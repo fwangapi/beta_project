@@ -1,6 +1,6 @@
 const { app, initDb, closeDb } = require('./app');
  
-//const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 initDb().then(() => { // 6. 修正了 .then() => 的语法错误
   app.listen(PORT, () => {
