@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Beta Journal</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #1e293b; background: #f8fafc; }
+      * { box-sizing: border-box; } body { margin: 0; }
+      main { max-width: 920px; margin: auto; padding: 32px 16px 64px; }
+      h1 { margin-bottom: 4px; } h2 { font-size: 1.15rem; margin-top: 0; }
+      .muted { color: #64748b; line-height: 1.5; }
+      .panel, article { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-top: 20px; }
+      label { display: block; font-weight: 650; font-size: .9rem; margin: 14px 0 6px; }
+      input, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; }
+      textarea { min-height: 100px; resize: vertical; } button { border: 0; border-radius: 7px; padding: 9px 13px; font: inherit; font-weight: 650; cursor: pointer; background: #2563eb; color: white; }
+      button.secondary { color: #1e40af; background: #e0e7ff; } button.danger { color: #b91c1c; background: #fee2e2; }
+      .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; } .hidden { display: none; }
+      .error { color: #b91c1c; } .success { color: #15803d; } .entry-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+      .entry-head h2 { margin-bottom: 3px; } .entry-content { white-space: pre-wrap; line-height: 1.55; }
+      .tag { display: inline-block; background: #e0e7ff; color: #3730a3; border-radius: 999px; padding: 3px 8px; margin: 2px 4px 0 0; font-size: .8rem; }
+      #search { margin-top: 16px; } @media (max-width: 560px) { .entry-head { display: block; } }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>My AI Journal</h1>
+      <p class="muted">Keep your own summaries of articles and podcasts. Add tags so that its easier for AI to suggest.</p>
+
+      <section class="panel">
+        <h2 id="form-heading">New journal entry</h2>
+        <form id="journal-form">
+
+          <!-- New YouTube quick-import bar -->
+          <label for="yt-url">Import directly from YouTube</label>
+          <div style="display: flex; gap: 8px;">
+          <input id="yt-url" placeholder="https://www.youtube.com/watch?v=...">
+          <button id="yt-fetch-btn" type="button" class="secondary" style="white-space: nowrap;">
+        📥 Fetch Transcript
+          </button>
+          </div>
+
+
+          <label for="raw-content">Paste article or transcript</label>
+          <textarea id="raw-content" placeholder="Paste the full article or transcript here..."></textarea>
+
+          <button id="ai-analyze" type="button" class="secondary" style="margin: 10px 0; width: 100%;">
+            ✨ Suggest Title, Summary & Tags
+          </button>
+          <p id="ai-status" class="muted" style="font-size: 0.85rem; min-height: 20px;"></p>
+
+          <label for="title">Title</label>
+          <input id="title" required placeholder="A brief thought worth remembering">
+
+          <label for="content">Summary and notes</label>
+          <textarea id="content" required placeholder="Write the important ideas in your own words…"></textarea>
+
+          <label for="source">Source</label>
+          <input id="source" required placeholder="Article URL, podcast episode, or publication name">
+
+          <label for="tags">Tags</label>
+          <input id="tags" placeholder="e.g. health, ai_infra, energy, ai_algo, semi, network">
+          <p class="muted">Separate tags with commas.</p>
+          <div class="actions"><button id="save" type="submit">Save entry</button><button id="cancel" class="secondary hidden" type="button">Cancel edit</button><span id="message" role="status"></span></div>
+        </form>
+      </section>
+
+      <input id="search" placeholder="Search tags, e.g. sqlite">
+      <section id="entries" aria-live="polite"></section>
+    </main>
+
+    <script>
+      const byId = (id) => document.getElementById(id);
+      let editingId = null;
+      const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+      const tagsFromInput = () => byId('tags').value.split(',').map((tag) => tag.trim()).filter(Boolean);
+
+      function setMessage(message = '', type = '') {
+        const output = byId('message'); output.textContent = message; output.className = type;
+      }
+
+      function resetForm() {
+        editingId = null;
+        byId('journal-form').reset();
+        byId('form-heading').textContent = 'New journal entry';
+        byId('save').textContent = 'Save entry';
+        byId('cancel').classList.add('hidden');
+        byId('ai-status').textContent = '';
+      }
+
+      function renderEntries(entries) {
+        byId('entries').innerHTML = entries.length ? entries.map((entry) => `
+          <article>
+            <div class="entry-head">
+              <div>
+                <h2>${escapeHtml(entry.title)}</h2>
+                <p class="muted">${escapeHtml(entry.source)} · ${escapeHtml(entry.created_at)}</p>
+              </div>
+              <div class="actions">
+                <button class="secondary" data-export="${entry.id}">Export .md</button>
+                <button class="secondary" data-edit="${entry.id}">Edit</button>
+                <button class="danger" data-delete="${entry.id}">Delete</button>
+              </div>
+            </div>
+            <div class="entry-content">${marked.parse(entry.content)}</div>
+            <div>${entry.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>
+          </article>`).join('') : '<p class="muted">No journal entries yet.</p>';
+      }
+
+      function downloadMarkdown(entry) {
+        const frontmatter = [
+          '---',
+          `title: "${entry.title.replace(/"/g, '\\"')}"`,
+          `source: "${entry.source}"`,
+          `date: "${entry.created_at}"`,
+          `tags: [${entry.tags.map(t => `"${t}"`).join(', ')}]`,
+          '---',
+          '',
+          `# ${entry.title}`,
+          '',
+          `**Source:** [${entry.source}](${entry.source})  `,
+          `**Captured:** ${entry.created_at}`,
+          '',
+          '---',
+          '',
+          entry.content
+        ].join('\n');
+
+        const blob = new Blob([frontmatter], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const safeFilename = entry.title.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 50);
+        a.href = url;
+        a.download = `${safeFilename || 'journal_entry'}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      async function loadEntries() {
+        const search = byId('search').value.trim();
+        const response = await fetch(`/api/journals${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+        const entries = await response.json();
+        if (!response.ok) throw new Error(entries.error || 'Could not load entries.');
+        renderEntries(entries);
+      }
+
+      byId('journal-form').addEventListener('submit', async (event) => {
+        event.preventDefault(); setMessage();
+        const payload = { title: byId('title').value, source: byId('source').value, content: byId('content').value, tags: tagsFromInput() };
+        const isEditing = editingId !== null;
+        const response = await fetch(isEditing ? `/api/journals/${editingId}` : '/api/journals', {
+          method: isEditing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) return setMessage(data.error || 'Could not save entry.', 'error');
+        setMessage(isEditing ? 'Entry updated.' : 'Entry saved.', 'success');
+        resetForm(); await loadEntries();
+      });
+
+      byId('entries').addEventListener('click', async (event) => {
+        const exportId = event.target.dataset.export;
+        const editId = event.target.dataset.edit;
+        const deleteId = event.target.dataset.delete;
+
+        if (exportId) {
+          const res = await fetch(`/api/journals/${exportId}`);
+          const entry = await res.json();
+          if (res.ok) downloadMarkdown(entry);
+          return;
+        }
+
+        if (deleteId) {
+          if (!confirm('Delete this journal entry?')) return;
+          const response = await fetch(`/api/journals/${deleteId}`, { method: 'DELETE' });
+          if (!response.ok) return setMessage('Could not delete entry.', 'error');
+          if (editingId === Number(deleteId)) resetForm();
+          setMessage('Entry deleted.', 'success'); await loadEntries(); return;
+        }
+
+        if (editId) {
+          const response = await fetch(`/api/journals/${editId}`);
+          const entry = await response.json();
+          if (!response.ok) return setMessage(entry.error || 'Could not load entry.', 'error');
+          editingId = entry.id;
+          byId('title').value = entry.title; byId('source').value = entry.source;
+          byId('content').value = entry.content; byId('tags').value = entry.tags.join(', ');
+          byId('form-heading').textContent = `Editing entry #${entry.id}`;
+          byId('save').textContent = 'Save changes'; byId('cancel').classList.remove('hidden');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+
+      byId('cancel').addEventListener('click', resetForm);
+      let searchTimer;
+      byId('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadEntries().catch((error) => setMessage(error.message, 'error')), 250); });
+      loadEntries().catch((error) => setMessage(error.message, 'error'));
+
+      byId('yt-fetch-btn').addEventListener('click', async () => {
+        const url = byId('yt-url').value.trim();
+        const status = byId('ai-status');
+
+        if (!url) {
+          status.textContent = 'Please enter a YouTube link first.';
+          status.className = 'muted error';
+          return;
+        }
+
+        status.textContent = '⏳ Pulling transcript from YouTube...';
+        status.className = 'muted';
+
+        try {
+          const res = await fetch('/api/transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+
+          byId('raw-content').value = data.transcript;
+          byId('source').value = url;
+
+          status.textContent = '✅ Transcript loaded! Now click "Suggest Title, Summary & Tags" to analyze.';
+          status.className = 'muted success';
+        } catch (err) {
+          status.textContent = '❌ ' + err.message;
+          status.className = 'muted error';
+        }
+      });
+
+      byId('ai-analyze').addEventListener('click', async () => {
+        const content = byId('raw-content').value;
+        const status = byId('ai-status');
+        if (content.length < 20) {
+          status.textContent = 'Please paste more content first.';
+          status.className = 'muted error';
+          return;
+        }
+        
+        status.textContent = '🤖 DeepSeek is thinking...';
+        status.className = 'muted';
+        
+        try {
+          const res = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error);
+          
+          if (data.title) byId('title').value = data.title;
+          if (data.summary) byId('content').value = data.summary;
+          if (data.tags) byId('tags').value = data.tags.join(', ');
+          
+          status.textContent = '✅ Done! Review and edit before saving.';
+          status.className = 'muted success';
+        } catch (e) {
+          status.textContent = '❌ ' + e.message;
+          status.className = 'muted error';
+        }
+      });
+    </script>
+
+  </body>
+</html>

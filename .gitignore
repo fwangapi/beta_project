@@ -1,0 +1,15 @@
+cat << 'EOF' > .gitignore
+# API keys and environment variables
+.env
+
+# Local SQLite databases
+*.db
+*.db-journal
+
+# Node dependencies
+node_modules/
+
+# OS / editor artifacts
+.DS_Store
+*.log
+EOF
