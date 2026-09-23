@@ -2,7 +2,8 @@
 // const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 const OpenAI = require('openai');
-const { YoutubeTranscript } = require('youtube-transcript');
+const transcriptLibrary = require('youtube-transcript');
+const { timingSafeEqual } = require('node:crypto');
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
@@ -11,7 +12,7 @@ const path = require('path');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 let db;
@@ -204,7 +205,7 @@ app.delete('/api/journals/:id', async (req, res) => {
 
 // app.post('/api/analyze', async (req, res) => {
 //   const { content } = req.body;
-//   if (!content || content.length < 20) {
+//   if (typeof content !== 'string' || content.trim().length < 20) {
 //     return res.status(400).json({ error: 'Content is too short.' });
 //   }
 
@@ -254,21 +255,70 @@ app.delete('/api/journals/:id', async (req, res) => {
 // });
 
 // 🎬 Fetch YouTube Transcript helper route
-app.post('/api/transcript', async (req, res) => {
-  const { url } = req.body;
-  if (!url) {
-    return res.status(400).json({ error: 'YouTube URL is required.' });
+// 🔒 Protection middleware: reject requests that don't supply the secret code
+
+// Authentication always runs on the server, before any paid API call.
+// Local bypass must be explicitly enabled; it is ignored in production/Render.
+const requireAuth = (req, res, next) => {
+  const password = process.env.APP_PASSWORD;
+  if (!password) {
+    if (process.env.ALLOW_UNAUTHENTICATED_LOCAL === 'true' &&
+        process.env.NODE_ENV !== 'production' && !process.env.RENDER) return next();
+    return res.status(503).json({ error: 'Set APP_PASSWORD on the server before using these features.' });
   }
+  const supplied = Buffer.from(req.headers['x-access-code'] || '');
+  const expected = Buffer.from(password);
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    return res.status(401).json({ error: 'Incorrect password. Click again to retry.' });
+  }
+  next();
+};
+
+function videoIdFrom(value) {
+  if (typeof value !== 'string') return null;
+  if (/^[\w-]{11}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    if (!['https:', 'http:'].includes(url.protocol)) return null;
+    let id;
+    if (url.hostname === 'youtu.be') id = url.pathname.split('/')[1];
+    else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(url.hostname)) {
+      id = url.searchParams.get('v');
+      if (!id && /^\/(shorts|embed|live)\//.test(url.pathname)) id = url.pathname.split('/')[2];
+    }
+    return /^[\w-]{11}$/.test(id || '') ? id : null;
+  } catch { return null; }
+}
+
+async function withTimeout(task, ms) {
+  let timer;
+  try {
+    return await Promise.race([task, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Transcript request timed out.')), ms);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+// ==========================================
+// 2. 应用中间件到敏感路由
+// ==========================================
+
+// 🎬 Fetch YouTube Transcript
+app.post('/api/transcript',  async (req, res) => {
+  const { url } = req.body;
+  const videoId = videoIdFrom(url);
+  if (!videoId) return res.status(400).json({ error: 'Enter a valid YouTube URL or 11-character video ID.' });
 
   try {
-    // youtube-transcript automatically parses video IDs from standard URLs, shorts, and youtu.be links
-    const transcriptItems = await YoutubeTranscript.fetchTranscript(url);
-
+    // Support both the current named export and older class-based releases.
+    const fetchTranscript = transcriptLibrary.fetchTranscript ||
+      transcriptLibrary.YoutubeTranscript?.fetchTranscript.bind(transcriptLibrary.YoutubeTranscript);
+    if (!fetchTranscript) throw new Error('Unsupported youtube-transcript package version.');
+    const transcriptItems = await withTimeout(fetchTranscript(videoId), 45000);
     if (!transcriptItems || transcriptItems.length === 0) {
       return res.status(404).json({ error: 'No captions found for this video.' });
     }
 
-    // Join all transcript segments into a clean continuous text block
     const fullText = transcriptItems
       .map(item => item.text.replace(/&amp;#39;/g, "'").replace(/&quot;/g, '"'))
       .join(' ');
@@ -276,57 +326,35 @@ app.post('/api/transcript', async (req, res) => {
     res.json({ transcript: fullText });
   } catch (error) {
     console.error('Transcript fetch error:', error);
-    res.status(500).json({ 
-      error: 'Could not retrieve transcript. The video may lack captions or have them disabled.' 
-    });
+    res.status(502).json({ error: 'Could not retrieve transcript (' + (error.name || 'Error') + '). YouTube may block this request or captions may be unavailable. Try another video or paste its transcript manually; see the server terminal for details.' });
   }
 });
 
-app.post('/api/analyze', async (req, res) => {
+// 🤖 AI 分析接口 (DeepSeek)
+app.post('/api/analyze', requireAuth, async (req, res) => {
   const { content } = req.body;
-  if (!content || content.length < 20) {
+  if (typeof content !== 'string' || content.trim().length < 20) {
     return res.status(400).json({ error: 'Content is too short.' });
   }
 
-  // Option A: DeepSeek
+  if (content.length > 200000) return res.status(413).json({ error: 'Transcript is too long; split it into smaller sections (maximum 200,000 characters).' });
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  const client = new OpenAI({
-    apiKey: apiKey,
-    baseURL: 'https://api.deepseek.com',
-  });
-  const modelName = 'deepseek-chat';
-
-  /* 
-  // Option B:  Qwen (Alibaba Cloud DashScope):
-  const apiKey = process.env.DASHSCOPE_API_KEY;
-  const client = new OpenAI({
-    apiKey: apiKey,
-    baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-  });
-  const modelName = 'qwen-plus';
-  */
-
-  if (!apiKey) {
-    return res.json({
-      title: 'Mock Analysis (Missing API Key)',
-      summary: 'Add your DEEPSEEK_API_KEY to .env to enable analysis.',
-      tags: ['mock', 'setup']
-    });
-  }
+  if (!apiKey) return res.status(503).json({ error: 'Set DEEPSEEK_API_KEY on the server and restart it.' });
 
   try {
+    const client = new OpenAI({ apiKey, baseURL: 'https://api.deepseek.com', timeout: 90000, maxRetries: 0 });
+    const modelName = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
     const prompt = `You are an expert technical analyst and summarizer. Analyze the provided transcript thoroughly.
-
 Provide:
 1. A concise, accurate title.
-2. A comprehensive, deeply detailed breakdown of every key topic and discussion point (covering technical hardware architecture, inference vs training, economics, and geopolitics).
-3. A critical "Commentary on Validity" evaluating the claims made (categorized by strong/verified claims vs questionable/contested claims).
+2. A comprehensive, deeply detailed breakdown of every key topic.
+3. A critical "Commentary on Validity" evaluating the claims made.
 4. 4-7 relevant lowercase topic tags.
 
 Format the response as a strict JSON object:
 {
   "title": "Clear, informative title",
-  "summary": "Full detailed markdown summary with headers (##), bullet points, and the validity commentary section",
+  "summary": "Full detailed markdown summary with headers (##) and bullet points",
   "tags": ["tag1", "tag2", "tag3"]
 }
 
@@ -337,16 +365,37 @@ ${content}
     const completion = await client.chat.completions.create({
       model: modelName,
       messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' }
+      response_format: { type: 'json_object' },
+      max_tokens: 4096
     });
 
+    if (completion.choices?.[0]?.finish_reason === 'length') throw new Error('AI output was truncated.');
     const data = JSON.parse(completion.choices[0].message.content);
+    if (typeof data.title !== 'string' || typeof data.summary !== 'string' ||
+        !Array.isArray(data.tags) || !data.tags.every(tag => typeof tag === 'string')) {
+      throw new Error('Unexpected AI response format.');
+    }
     res.json(data);
   } catch (error) {
     console.error('Analysis Error:', error);
-    res.status(500).json({ error: 'AI analysis failed: ' + (error.message || error) });
+    res.status(502).json({ error: 'AI analysis failed. Check the server terminal for the provider error (API key, credit balance, model or timeout).' });
   }
 });
 
+// Return JSON even when the JSON body parser rejects a request.
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.too.large') return res.status(413).json({ error: 'Request is too large (maximum 1 MB).' });
+  if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON request.' });
+  console.error(error);
+  res.status(500).json({ error: 'Unexpected server error.' });
+});
 
 module.exports = { app, initDb, closeDb };
+
+// Existing server.js imports still work; node app.js now also starts the app.
+if (require.main === module) {
+  initDb(process.env.DATABASE_PATH || './beta.db').then(() => {
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => console.log(`Beta Journal: http://localhost:${port}`));
+  }).catch(error => { console.error('Startup failed:', error); process.exitCode = 1; });
+}

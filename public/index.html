@@ -22,15 +22,17 @@
       .tag { display: inline-block; background: #e0e7ff; color: #3730a3; border-radius: 999px; padding: 3px 8px; margin: 2px 4px 0 0; font-size: .8rem; }
       #search { margin-top: 16px; } @media (max-width: 560px) { .entry-head { display: block; } }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
   </head>
   <body>
     <main>
       <h1>My AI Journal</h1>
-      <p class="muted">Keep your own summaries of articles and podcasts. Add tags so that its easier for AI to suggest.</p>
+      <p class="muted">Convert Youtube transcripts to ai summary title and tags.</p>
 
       <section class="panel">
         <h2 id="form-heading">New journal entry</h2>
+
+
         <form id="journal-form">
 
           <!-- New YouTube quick-import bar -->
@@ -49,7 +51,7 @@
           <button id="ai-analyze" type="button" class="secondary" style="margin: 10px 0; width: 100%;">
             ✨ Suggest Title, Summary & Tags
           </button>
-          <p id="ai-status" class="muted" style="font-size: 0.85rem; min-height: 20px;"></p>
+          <p role="status" aria-live="polite" id="ai-status" class="muted" style="font-size: 0.85rem; min-height: 20px;"></p>
 
           <label for="title">Title</label>
           <input id="title" required placeholder="A brief thought worth remembering">
@@ -72,133 +74,43 @@
     </main>
 
     <script>
-      const byId = (id) => document.getElementById(id);
-      let editingId = null;
-      const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
-      const tagsFromInput = () => byId('tags').value.split(',').map((tag) => tag.trim()).filter(Boolean);
+      // Define helpers BEFORE registering event handlers.
+      const byId = id => document.getElementById(id);
+      let accessCode = ''; // Keep the password in memory, not persistent storage.
+      try { localStorage.removeItem('journal_access_code'); } catch {}
 
-      function setMessage(message = '', type = '') {
-        const output = byId('message'); output.textContent = message; output.className = type;
-      }
-
-      function resetForm() {
-        editingId = null;
-        byId('journal-form').reset();
-        byId('form-heading').textContent = 'New journal entry';
-        byId('save').textContent = 'Save entry';
-        byId('cancel').classList.add('hidden');
-        byId('ai-status').textContent = '';
-      }
-
-      function renderEntries(entries) {
-        byId('entries').innerHTML = entries.length ? entries.map((entry) => `
-          <article>
-            <div class="entry-head">
-              <div>
-                <h2>${escapeHtml(entry.title)}</h2>
-                <p class="muted">${escapeHtml(entry.source)} · ${escapeHtml(entry.created_at)}</p>
-              </div>
-              <div class="actions">
-                <button class="secondary" data-export="${entry.id}">Export .md</button>
-                <button class="secondary" data-edit="${entry.id}">Edit</button>
-                <button class="danger" data-delete="${entry.id}">Delete</button>
-              </div>
-            </div>
-            <div class="entry-content">${marked.parse(entry.content)}</div>
-            <div>${entry.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>
-          </article>`).join('') : '<p class="muted">No journal entries yet.</p>';
-      }
-
-      function downloadMarkdown(entry) {
-        const frontmatter = [
-          '---',
-          `title: "${entry.title.replace(/"/g, '\\"')}"`,
-          `source: "${entry.source}"`,
-          `date: "${entry.created_at}"`,
-          `tags: [${entry.tags.map(t => `"${t}"`).join(', ')}]`,
-          '---',
-          '',
-          `# ${entry.title}`,
-          '',
-          `**Source:** [${entry.source}](${entry.source})  `,
-          `**Captured:** ${entry.created_at}`,
-          '',
-          '---',
-          '',
-          entry.content
-        ].join('\n');
-
-        const blob = new Blob([frontmatter], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const safeFilename = entry.title.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 50);
-        a.href = url;
-        a.download = `${safeFilename || 'journal_entry'}.md`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-
-      async function loadEntries() {
-        const search = byId('search').value.trim();
-        const response = await fetch(`/api/journals${search ? `?search=${encodeURIComponent(search)}` : ''}`);
-        const entries = await response.json();
-        if (!response.ok) throw new Error(entries.error || 'Could not load entries.');
-        renderEntries(entries);
-      }
-
-      byId('journal-form').addEventListener('submit', async (event) => {
-        event.preventDefault(); setMessage();
-        const payload = { title: byId('title').value, source: byId('source').value, content: byId('content').value, tags: tagsFromInput() };
-        const isEditing = editingId !== null;
-        const response = await fetch(isEditing ? `/api/journals/${editingId}` : '/api/journals', {
-          method: isEditing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-        });
-        const data = await response.json();
-        if (!response.ok) return setMessage(data.error || 'Could not save entry.', 'error');
-        setMessage(isEditing ? 'Entry updated.' : 'Entry saved.', 'success');
-        resetForm(); await loadEntries();
-      });
-
-      byId('entries').addEventListener('click', async (event) => {
-        const exportId = event.target.dataset.export;
-        const editId = event.target.dataset.edit;
-        const deleteId = event.target.dataset.delete;
-
-        if (exportId) {
-          const res = await fetch(`/api/journals/${exportId}`);
-          const entry = await res.json();
-          if (res.ok) downloadMarkdown(entry);
-          return;
+      async function request(path, options = {}, allowPrompt = false) {
+        if (location.protocol === 'file:') throw new Error('Open http://localhost:3000 after starting the Node server.');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 100000);
+        let res;
+        try {
+          res = await fetch(path, { ...options, signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', ...options.headers,
+              ...(accessCode ? { 'x-access-code': accessCode } : {}) } });
+        } catch (error) {
+          throw new Error(error.name === 'AbortError' ? 'Request timed out. Try again later.' : 'Cannot reach the server. Check that it is running.');
+        } finally { clearTimeout(timer); }
+        if (res.status === 401) {
+          accessCode = '';
+          if (allowPrompt) {
+            const entered = prompt('🔒 Enter the application password:');
+            if (!entered) throw new Error('Cancelled. No AI request was authorized.');
+            accessCode = entered;
+            return request(path, options, false);
+          }
         }
+        if (res.status === 204) return null;
+        let data;
+        try { data = await res.json(); }
+        catch { throw new Error(`Server returned HTTP ${res.status} without JSON. Check the server URL and logs.`); }
+        if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+        return data;
+      }
 
-        if (deleteId) {
-          if (!confirm('Delete this journal entry?')) return;
-          const response = await fetch(`/api/journals/${deleteId}`, { method: 'DELETE' });
-          if (!response.ok) return setMessage('Could not delete entry.', 'error');
-          if (editingId === Number(deleteId)) resetForm();
-          setMessage('Entry deleted.', 'success'); await loadEntries(); return;
-        }
-
-        if (editId) {
-          const response = await fetch(`/api/journals/${editId}`);
-          const entry = await response.json();
-          if (!response.ok) return setMessage(entry.error || 'Could not load entry.', 'error');
-          editingId = entry.id;
-          byId('title').value = entry.title; byId('source').value = entry.source;
-          byId('content').value = entry.content; byId('tags').value = entry.tags.join(', ');
-          byId('form-heading').textContent = `Editing entry #${entry.id}`;
-          byId('save').textContent = 'Save changes'; byId('cancel').classList.remove('hidden');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      });
-
-      byId('cancel').addEventListener('click', resetForm);
-      let searchTimer;
-      byId('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadEntries().catch((error) => setMessage(error.message, 'error')), 250); });
-      loadEntries().catch((error) => setMessage(error.message, 'error'));
-
+      // ==========================================
+      // 🎬 YouTube Fetch 按钮逻辑
+      // ==========================================
       byId('yt-fetch-btn').addEventListener('click', async () => {
         const url = byId('yt-url').value.trim();
         const status = byId('ai-status');
@@ -209,61 +121,135 @@
           return;
         }
 
+        byId('yt-fetch-btn').disabled = true;
         status.textContent = '⏳ Pulling transcript from YouTube...';
         status.className = 'muted';
 
         try {
-          const res = await fetch('/api/transcript', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error);
+          const data = await request('/api/transcript', {
+            method: 'POST', body: JSON.stringify({ url })
+          }, false);
 
           byId('raw-content').value = data.transcript;
           byId('source').value = url;
-
-          status.textContent = '✅ Transcript loaded! Now click "Suggest Title, Summary & Tags" to analyze.';
+          status.textContent = '✅ Transcript loaded! Now click "Suggest Title, Summary & Tags".';
           status.className = 'muted success';
         } catch (err) {
           status.textContent = '❌ ' + err.message;
           status.className = 'muted error';
+        } finally {
+          byId('yt-fetch-btn').disabled = false;
         }
       });
 
+      // ==========================================
+      // 🤖 AI Analyze 按钮逻辑
+      // ==========================================
       byId('ai-analyze').addEventListener('click', async () => {
         const content = byId('raw-content').value;
         const status = byId('ai-status');
+
         if (content.length < 20) {
           status.textContent = 'Please paste more content first.';
           status.className = 'muted error';
           return;
         }
-        
-        status.textContent = '🤖 DeepSeek is thinking...';
+
+        byId('ai-analyze').disabled = true;
+        status.textContent = '🤖 AI is thinking...';
         status.className = 'muted';
-        
+
         try {
-          const res = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error);
-          
+          const data = await request('/api/analyze', {
+            method: 'POST', body: JSON.stringify({ content })
+          }, true);
+
           if (data.title) byId('title').value = data.title;
           if (data.summary) byId('content').value = data.summary;
           if (data.tags) byId('tags').value = data.tags.join(', ');
-          
+
           status.textContent = '✅ Done! Review and edit before saving.';
           status.className = 'muted success';
         } catch (e) {
           status.textContent = '❌ ' + e.message;
           status.className = 'muted error';
+        } finally {
+          byId('ai-analyze').disabled = false;
         }
       });
+      let editingId = null;
+      let loadSequence = 0;
+      function message(text, error = false) {
+        byId('message').textContent = text;
+        byId('message').className = error ? 'error' : 'success';
+      }
+      function resetForm() {
+        editingId = null;
+        byId('journal-form').reset();
+        byId('form-heading').textContent = 'New journal entry';
+        byId('cancel').classList.add('hidden');
+        byId('ai-status').textContent = '';
+      }
+      function element(tag, text, className) {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      }
+      async function loadEntries() {
+        const sequence = ++loadSequence;
+        try {
+          const entries = await request('/api/journals?search=' + encodeURIComponent(byId('search').value));
+          if (sequence !== loadSequence) return;
+          byId('entries').replaceChildren();
+          for (const entry of entries) {
+            const article = document.createElement('article');
+            article.append(element('h2', entry.title), element('p', entry.source, 'muted'),
+              element('div', entry.content, 'entry-content'));
+            for (const tag of entry.tags) article.append(element('span', tag, 'tag'));
+            const actions = element('div', '', 'actions');
+            const edit = element('button', 'Edit', 'secondary');
+            edit.type = 'button';
+            edit.onclick = () => {
+              editingId = entry.id;
+              for (const name of ['title', 'content', 'source']) byId(name).value = entry[name];
+              byId('tags').value = entry.tags.join(', ');
+              byId('form-heading').textContent = 'Edit journal entry';
+              byId('cancel').classList.remove('hidden');
+              byId('title').focus();
+            };
+            const remove = element('button', 'Delete', 'danger');
+            remove.type = 'button';
+            remove.onclick = async () => {
+              if (!confirm('Delete this journal entry?')) return;
+              try {
+                await request('/api/journals/' + entry.id, { method: 'DELETE' });
+                if (editingId === entry.id) resetForm();
+                await loadEntries();
+              } catch (error) { message(error.message, true); }
+            };
+            actions.append(edit, remove); article.append(actions);
+            byId('entries').append(article);
+          }
+        } catch (error) { if (sequence === loadSequence) message(error.message, true); }
+      }
+      byId('journal-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        byId('save').disabled = true;
+        try {
+          const body = {};
+          for (const name of ['title', 'content', 'source']) body[name] = byId(name).value.trim();
+          body.tags = byId('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
+          await request('/api/journals' + (editingId === null ? '' : '/' + editingId), {
+            method: editingId === null ? 'POST' : 'PUT', body: JSON.stringify(body)
+          });
+          resetForm(); message('Saved.'); await loadEntries();
+        } catch (error) { message(error.message, true); }
+        finally { byId('save').disabled = false; }
+      });
+      byId('cancel').addEventListener('click', resetForm);
+      byId('search').addEventListener('input', loadEntries);
+      loadEntries();
     </script>
 
   </body>
