@@ -38,19 +38,12 @@ async function createJournalTable() {
   await db.exec(`CREATE TABLE IF NOT EXISTS journals ( 
     id INTEGER PRIMARY KEY AUTOINCREMENT, 
     title TEXT NOT NULL, 
-    content TEXT NOT NULL,         
-    ai_summary TEXT,               -- 新增：AI 总结
+    ai_summary TEXT NOT NULL DEFAULT '',
+    thoughts TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL, 
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, 
     tags_json TEXT NOT NULL DEFAULT '[]' 
   )`);
-  
-  // 极简迁移：如果旧表没有这个列，就加上
-  try {
-    await db.exec('ALTER TABLE journals ADD COLUMN ai_summary TEXT;');
-  } catch (e) {
-    // 如果列已存在，会报错，忽略即可
-  }
 }
 
 // Earlier learning versions used source UNIQUE, date, and a comma-separated
@@ -65,13 +58,17 @@ async function migrateOldJournalTable() {
     await db.exec('ALTER TABLE journals RENAME TO journals_old');
     await createJournalTable();
     for (const row of oldRows) {
+      const aiSummary = typeof row.content === 'string' ? row.content : row.ai_summary || '';
+      const thoughts = typeof row.content === 'string'
+        ? row.ai_summary && row.ai_summary !== row.content ? row.ai_summary : ''
+        : row.thoughts || '';
       const tags = typeof row.tag === 'string'
         ? row.tag.split(',').map((tag) => tag.trim()).filter(Boolean)
         : [];
       await db.run(
-        `INSERT INTO journals (id, title, content, source, created_at, tags_json)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [row.id, row.title, row.content || '', row.source, row.date || new Date().toISOString(), JSON.stringify(tags)]
+        `INSERT INTO journals (id, title, ai_summary, thoughts, source, created_at, tags_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [row.id, row.title, aiSummary, thoughts, row.source, row.date || new Date().toISOString(), JSON.stringify(tags)]
       );
     }
     await db.exec('DROP TABLE journals_old');
@@ -82,11 +79,49 @@ async function migrateOldJournalTable() {
   }
 }
 
+async function migrateJournalColumns() {
+  let columns = await db.all('PRAGMA table_info(journals)');
+  let names = new Set(columns.map((column) => column.name));
+
+  if (names.has('content')) {
+    await db.exec('BEGIN');
+    try {
+      if (names.has('ai_summary') && !names.has('thoughts')) {
+        await db.run('UPDATE journals SET ai_summary = NULL WHERE ai_summary = content');
+        await db.exec('ALTER TABLE journals RENAME COLUMN ai_summary TO thoughts');
+      } else if (!names.has('thoughts')) {
+        await db.exec("ALTER TABLE journals ADD COLUMN thoughts TEXT NOT NULL DEFAULT ''");
+      }
+      if (names.has('ai_summary') && names.has('thoughts')) {
+        throw new Error('Cannot migrate journals: both old and new summary columns exist alongside content.');
+      }
+      await db.exec('ALTER TABLE journals RENAME COLUMN content TO ai_summary');
+      await db.run("UPDATE journals SET thoughts = '' WHERE thoughts IS NULL");
+      await db.exec('COMMIT');
+    } catch (error) {
+      await db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  columns = await db.all('PRAGMA table_info(journals)');
+  names = new Set(columns.map((column) => column.name));
+  if (!names.has('ai_summary')) {
+    await db.exec("ALTER TABLE journals ADD COLUMN ai_summary TEXT NOT NULL DEFAULT ''");
+  }
+  if (!names.has('thoughts')) {
+    await db.exec("ALTER TABLE journals ADD COLUMN thoughts TEXT NOT NULL DEFAULT ''");
+  }
+  await db.run("UPDATE journals SET ai_summary = '' WHERE ai_summary IS NULL");
+  await db.run("UPDATE journals SET thoughts = '' WHERE thoughts IS NULL");
+}
+
 const initDb = async (filename = './beta.db') => {
   if (db) await db.close();
   db = await open({ filename, driver: sqlite3.Database });
   await createJournalTable();
   await migrateOldJournalTable();
+  await migrateJournalColumns();
   console.log('✅ Your database is successfully initialized!');
 };
 
@@ -134,8 +169,12 @@ app.get('/api/journals/:id', async (req, res) => {
 
 app.post('/api/journals', async (req, res) => {
   const title = cleanText(req.body.title);
-  const content = cleanText(req.body.content);
-  const ai_summary = cleanText(req.body.ai_summary); // 新增
+  const aiSummary = cleanText(req.body.ai_summary);
+  if (req.body.thoughts !== undefined && req.body.thoughts !== null &&
+      typeof req.body.thoughts !== 'string') {
+    return res.status(400).json({ error: 'thoughts must be text.' });
+  }
+  const thoughts = cleanText(req.body.thoughts);
   const source = cleanText(req.body.source);
   let tags;
   try {
@@ -143,14 +182,14 @@ app.post('/api/journals', async (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-  if (!title || !content || !source) {
-    return res.status(400).json({ error: 'title, content, and source are required.' });
+  if (!title || !aiSummary || !source) {
+    return res.status(400).json({ error: 'title, ai_summary, and source are required.' });
   }
 
   try {
     const result = await db.run(
-      'INSERT INTO journals (title, content, ai_summary, source, tags_json) VALUES (?, ?, ?, ?, ?)',
-        [title, content, ai_summary, source, JSON.stringify(tags)]
+      'INSERT INTO journals (title, ai_summary, thoughts, source, tags_json) VALUES (?, ?, ?, ?, ?)',
+      [title, aiSummary, thoughts, source, JSON.stringify(tags)]
     );
     const row = await db.get('SELECT * FROM journals WHERE id = ?', [result.lastID]);
     res.status(201).json(journalFromRow(row));
@@ -162,7 +201,7 @@ app.post('/api/journals', async (req, res) => {
 app.put('/api/journals/:id', async (req, res) => {
   const fields = [];
   const values = [];
-  for (const name of ['title', 'content', 'source']) {
+  for (const name of ['title', 'ai_summary', 'source']) {
     if (req.body[name] !== undefined) {
       const value = cleanText(req.body[name]);
       if (!value) return res.status(400).json({ error: `${name} cannot be empty.` });
@@ -177,6 +216,13 @@ app.put('/api/journals/:id', async (req, res) => {
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
+  }
+  if (req.body.thoughts !== undefined) {
+    if (req.body.thoughts !== null && typeof req.body.thoughts !== 'string') {
+      return res.status(400).json({ error: 'thoughts must be text.' });
+    }
+    fields.push('thoughts = ?');
+    values.push(cleanText(req.body.thoughts));
   }
   if (fields.length === 0) return res.status(400).json({ error: 'Provide at least one field to update.' });
 
@@ -347,9 +393,11 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
     const prompt = `You are an expert technical analyst and summarizer. Analyze the provided transcript thoroughly.
 Provide:
 1. A concise, accurate title.
-2. A comprehensive, deeply detailed breakdown of every key topic.
-3. A critical "Commentary on Validity" evaluating the claims made.
+2. A thorough but concise breakdown of the key topics and claims.
+3. A brief "Commentary on Validity" noting claims that appear strong or uncertain.
 4. 4-7 relevant lowercase topic tags.
+
+Do not reproduce the transcript; prioritize useful details and finish valid JSON.
 
 Format the response as a strict JSON object:
 {
@@ -366,7 +414,7 @@ ${content}
       model: modelName,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
-      max_tokens: 4096
+      max_tokens: 100000
     });
 
     if (completion.choices?.[0]?.finish_reason === 'length') throw new Error('AI output was truncated.');

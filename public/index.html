@@ -56,8 +56,11 @@
           <label for="title">Title</label>
           <input id="title" required placeholder="A brief thought worth remembering">
 
-          <label for="content">Summary and notes</label>
-          <textarea id="content" required placeholder="Write the important ideas in your own words…"></textarea>
+          <label for="ai-summary">AI Summary</label>
+          <textarea id="ai-summary" required placeholder="Generate or edit the AI summary…"></textarea>
+
+          <label for="thoughts">My thoughts</label>
+          <textarea id="thoughts" placeholder="Add your own thoughts or reflections…"></textarea>
 
           <label for="source">Source</label>
           <input id="source" required placeholder="Article URL, podcast episode, or publication name">
@@ -165,7 +168,7 @@
           }, true);
 
           if (data.title) byId('title').value = data.title;
-          if (data.summary) byId('content').value = data.summary;
+          if (data.summary) byId('ai-summary').value = data.summary;
           if (data.tags) byId('tags').value = data.tags.join(', ');
 
           status.textContent = '✅ Done! Review and edit before saving.';
@@ -205,14 +208,19 @@
           for (const entry of entries) {
             const article = document.createElement('article');
             article.append(element('h2', entry.title), element('p', entry.source, 'muted'),
-              element('div', entry.content, 'entry-content'));
+              element('h3', 'AI Summary'), element('div', entry.ai_summary, 'entry-content'));
+            if (entry.thoughts) {
+              article.append(element('h3', 'My thoughts'), element('div', entry.thoughts, 'entry-content'));
+            }
             for (const tag of entry.tags) article.append(element('span', tag, 'tag'));
             const actions = element('div', '', 'actions');
             const edit = element('button', 'Edit', 'secondary');
             edit.type = 'button';
             edit.onclick = () => {
               editingId = entry.id;
-              for (const name of ['title', 'content', 'source']) byId(name).value = entry[name];
+              for (const name of ['title', 'source']) byId(name).value = entry[name];
+              byId('ai-summary').value = entry.ai_summary || '';
+              byId('thoughts').value = entry.thoughts || '';
               byId('tags').value = entry.tags.join(', ');
               byId('form-heading').textContent = 'Edit journal entry';
               byId('cancel').classList.remove('hidden');
@@ -238,7 +246,11 @@
         byId('save').disabled = true;
         try {
           const body = {};
-          for (const name of ['title', 'content', 'source']) body[name] = byId(name).value.trim();
+          for (const name of ['title', 'ai_summary', 'source']) {
+            const field = name === 'ai_summary' ? 'ai-summary' : name;
+            body[name] = byId(field).value.trim();
+          }
+          body.thoughts = byId('thoughts').value.trim();
           body.tags = byId('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
           await request('/api/journals' + (editingId === null ? '' : '/' + editingId), {
             method: editingId === null ? 'POST' : 'PUT', body: JSON.stringify(body)
