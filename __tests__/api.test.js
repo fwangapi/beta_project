@@ -92,14 +92,12 @@ describe('Beta journal API', () => {
     expect(missing.status).toBe(404);
   });
 
-  it('analyzes content', async () => {
+  it('requires authentication before analyzing content', async () => {
     const response = await request(app).post('/api/analyze').send({
       content: 'This is a long enough content string to trigger the AI analysis analysis analysis.'
     });
-    expect(response.status).toBe(200);
-    expect(response.body).toHaveProperty('title');
-    expect(response.body).toHaveProperty('summary');
-    expect(response.body).toHaveProperty('tags');
+    expect(response.status).toBe(401);
+    expect(response.body.error).toMatch(/password/i);
   });
 
   it('migrates the old content and ai_summary columns without duplicating summaries as thoughts', async () => {
