@@ -16,9 +16,12 @@ rate-limited by YouTube.
 beta/
 ├── app.js                  Express app, API routes, DeepSeek integration,
 │                           transcript fetching, SQLite setup and migrations
+├── beta_digest.py          Email unsent journal entries using Gamma's Gmail settings
 ├── index.js                Server entry point used by npm start / npm run dev
 ├── public/
 │   └── index.html          Single-page frontend: form, browser logic and styles
+├── tests/
+│   └── test_beta_digest.py Python tests for digest rendering and delivery state
 ├── __tests__/
 │   └── api.test.js         API, persistence and database migration tests
 ├── check-models.js         Older Gemini model-listing helper; not used by app
@@ -59,6 +62,11 @@ journals
 ├── source      TEXT     Video URL or other source description
 ├── created_at  TEXT     Creation timestamp, defaults to SQLite current time
 └── tags_json   TEXT     Tags stored as JSON text, e.g. ["ai", "hardware"]
+
+beta_digest_deliveries
+├── journal_id  INTEGER  Journal entry ID, primary key
+├── sent_at     TEXT     Time sent or baselined
+└── status      TEXT     "sent" after email, or "baseline" for pre-existing rows
 ```
 
 The API converts `tags_json` to a `tags` array for the frontend. Startup runs
@@ -135,8 +143,10 @@ npm test
 ```
 
 The Jest/Supertest suite covers the journal API, summary/thought persistence,
-the protected analysis route, and upgrading an old database schema. Tests use
-a temporary database and do not make a live DeepSeek or YouTube request.
+the protected analysis route, and upgrading an old database schema. The
+Python standard-library tests cover the Beta email digest without contacting
+Gmail. Tests use temporary databases and do not make live DeepSeek or YouTube
+requests.
 
 Useful starting points:
 
@@ -146,6 +156,35 @@ Useful starting points:
 - Database creation and compatibility migrations: `app.js`, near
   `createJournalTable`, `migrateOldJournalTable`, and `migrateJournalColumns`
 - API and migration examples: `__tests__/api.test.js`
+
+## Email new journal entries
+
+`beta_digest.py` sends newly saved summaries and optional thoughts as an email
+with both HTML and plain-text alternatives. It reads `GMAIL_SENDER`,
+`GMAIL_APP_PASSWORD`, and `GMAIL_RECEIVER` from the sibling Gamma project's
+`.env` by default (`../gamma/.env`). It sends one digest for all pending
+entries and records delivery state in a `beta_digest_deliveries` table. Gmail
+delivery is recorded only after the message is accepted.
+
+The first normal run establishes a baseline and does not email entries already
+in the database. Later entries are included in the next digest. Use
+`--include-existing` on the first real run if you want a one-time email of
+existing entries instead.
+
+Preview what would be sent without sending or marking entries:
+
+```sh
+../gamma/gamma/bin/python beta_digest.py --dry-run
+```
+
+On the first dry run, the script explains that existing entries would be
+baselined; it does not create delivery state. Run it manually with Gamma's
+Python virtual environment, or let Gamma's `run_pipeline.py` invoke it after
+the market report when the Beta project and `beta.db` are available at
+`../beta`. Set `BETA_PROJECT_ROOT` and optionally `BETA_DATABASE_PATH` in the
+pipeline environment if the projects or database are elsewhere. The digest is
+a separate email from Gamma's market report, keeping report generation
+independent.
 
 ## Change history
 

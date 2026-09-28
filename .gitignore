@@ -1,4 +1,3 @@
-cat << 'EOF' > .gitignore
 # API keys and environment variables
 .env
 
@@ -9,7 +8,10 @@ cat << 'EOF' > .gitignore
 # Node dependencies
 node_modules/
 
-# OS / editor artifacts
+# Python caches
+__pycache__/
+*.py[cod]
+
+# OS and log files
 .DS_Store
 *.log
-EOF
