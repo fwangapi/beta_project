@@ -8,7 +8,9 @@ from your personal thoughts.
 The app is designed to run on your own computer. The browser UI, Node.js server,
 and SQLite database are local; AI analysis is sent from the server to DeepSeek.
 YouTube transcript fetching uses an unofficial interface and can be blocked or
-rate-limited by YouTube.
+rate-limited by YouTube. The fetch action requests English captions; it reports
+an error rather than silently loading the video's first available language when
+English captions are unavailable.
 
 ## Project map
 

@@ -360,7 +360,7 @@ app.post('/api/transcript',  async (req, res) => {
     const fetchTranscript = transcriptLibrary.fetchTranscript ||
       transcriptLibrary.YoutubeTranscript?.fetchTranscript.bind(transcriptLibrary.YoutubeTranscript);
     if (!fetchTranscript) throw new Error('Unsupported youtube-transcript package version.');
-    const transcriptItems = await withTimeout(fetchTranscript(videoId), 45000);
+    const transcriptItems = await withTimeout(fetchTranscript(videoId, { lang: 'en' }), 45000);
     if (!transcriptItems || transcriptItems.length === 0) {
       return res.status(404).json({ error: 'No captions found for this video.' });
     }
@@ -371,6 +371,9 @@ app.post('/api/transcript',  async (req, res) => {
 
     res.json({ transcript: fullText });
   } catch (error) {
+    if (error.name === 'YoutubeTranscriptNotAvailableLanguageError') {
+      return res.status(404).json({ error: 'English captions are not available for this video. Try another video or paste its transcript manually.' });
+    }
     console.error('Transcript fetch error:', error);
     res.status(502).json({ error: 'Could not retrieve transcript (' + (error.name || 'Error') + '). YouTube may block this request or captions may be unavailable. Try another video or paste its transcript manually; see the server terminal for details.' });
   }
