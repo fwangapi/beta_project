@@ -13,7 +13,7 @@
       .muted { color: #64748b; line-height: 1.5; }
       .panel, article { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-top: 20px; }
       label { display: block; font-weight: 650; font-size: .9rem; margin: 14px 0 6px; }
-      input, textarea, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; }
+      input, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; }
       textarea { min-height: 100px; resize: vertical; } button { border: 0; border-radius: 7px; padding: 9px 13px; font: inherit; font-weight: 650; cursor: pointer; background: #2563eb; color: white; }
       button.secondary { color: #1e40af; background: #e0e7ff; } button.danger { color: #b91c1c; background: #fee2e2; }
       .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; } .hidden { display: none; }
@@ -45,15 +45,8 @@
           </div>
 
 
-          <label for="transcript">Transcript or source text</label>
-          <textarea id="transcript" placeholder="Fetched YouTube captions are saved here. You can also paste transcript or article text."></textarea>
-          <label for="input-kind">Text type</label>
-          <select id="input-kind">
-            <option value="unknown">Unverified pasted text</option>
-            <option value="transcript">Transcript</option>
-            <option value="article">Article</option>
-            <option value="episode_notes" disabled>Legacy episode notes (saved entries only)</option>
-          </select>
+          <label for="raw-content">Paste article or transcript</label>
+          <textarea id="raw-content" placeholder="Paste the full article or transcript here..."></textarea>
 
           <button id="ai-analyze" type="button" class="secondary" style="margin: 10px 0; width: 100%;">
             ✨ Suggest Title, Summary & Tags
@@ -87,9 +80,6 @@
       // Define helpers BEFORE registering event handlers.
       const byId = id => document.getElementById(id);
       let accessCode = ''; // Keep the password in memory, not persistent storage.
-      let transcriptSource = 'manual';
-      let transcriptUrl = '';
-      let analysisSnapshot = null;
       try { localStorage.removeItem('journal_access_code'); } catch {}
 
       async function request(path, options = {}, allowPrompt = false) {
@@ -143,12 +133,8 @@
             method: 'POST', body: JSON.stringify({ url })
           }, false);
 
-          byId('transcript').value = data.transcript;
+          byId('raw-content').value = data.transcript;
           byId('source').value = url;
-          byId('input-kind').value = 'transcript';
-          transcriptSource = 'youtube';
-          transcriptUrl = '';
-          analysisSnapshot = null;
           status.textContent = '✅ Transcript loaded! Now click "Suggest Title, Summary & Tags".';
           status.className = 'muted success';
         } catch (err) {
@@ -158,17 +144,12 @@
           byId('yt-fetch-btn').disabled = false;
         }
       });
-      byId('transcript').addEventListener('input', () => {
-        transcriptSource = 'manual';
-        transcriptUrl = '';
-      });
 
       // ==========================================
       // 🤖 AI Analyze 按钮逻辑
       // ==========================================
       byId('ai-analyze').addEventListener('click', async () => {
-        const content = byId('transcript').value;
-        const inputKind = byId('input-kind').value;
+        const content = byId('raw-content').value;
         const status = byId('ai-status');
 
         if (content.length < 20) {
@@ -183,17 +164,12 @@
 
         try {
           const data = await request('/api/analyze', {
-            method: 'POST', body: JSON.stringify({ content, input_kind: inputKind })
+            method: 'POST', body: JSON.stringify({ content })
           }, true);
 
           if (data.title) byId('title').value = data.title;
           if (data.summary) byId('ai-summary').value = data.summary;
           if (data.tags) byId('tags').value = data.tags.join(', ');
-          analysisSnapshot = {
-            content,
-            kind: data.input_kind || inputKind,
-            basis: data.analysis_basis || ''
-          };
 
           status.textContent = '✅ Done! Review and edit before saving.';
           status.className = 'muted success';
@@ -212,9 +188,6 @@
       }
       function resetForm() {
         editingId = null;
-        transcriptSource = 'manual';
-        transcriptUrl = '';
-        analysisSnapshot = null;
         byId('journal-form').reset();
         byId('form-heading').textContent = 'New journal entry';
         byId('cancel').classList.add('hidden');
@@ -236,12 +209,6 @@
             const article = document.createElement('article');
             article.append(element('h2', entry.title), element('p', entry.source, 'muted'),
               element('h3', 'AI Summary'), element('div', entry.ai_summary, 'entry-content'));
-            if (entry.transcript) {
-              const details = document.createElement('details');
-              details.append(element('summary', `Saved transcript (${entry.transcript_source || 'manual'})`),
-                element('pre', entry.transcript, 'entry-content'));
-              article.append(details);
-            }
             if (entry.thoughts) {
               article.append(element('h3', 'My thoughts'), element('div', entry.thoughts, 'entry-content'));
             }
@@ -255,15 +222,6 @@
               byId('ai-summary').value = entry.ai_summary || '';
               byId('thoughts').value = entry.thoughts || '';
               byId('tags').value = entry.tags.join(', ');
-              byId('transcript').value = entry.transcript || '';
-              byId('input-kind').value = entry.input_kind || 'unknown';
-              transcriptSource = entry.transcript_source || 'manual';
-              transcriptUrl = entry.transcript_url || '';
-              analysisSnapshot = entry.analysis_input ? {
-                content: entry.analysis_input,
-                kind: entry.analysis_input_kind || 'unknown',
-                basis: entry.analysis_basis || ''
-              } : null;
               byId('form-heading').textContent = 'Edit journal entry';
               byId('cancel').classList.remove('hidden');
               byId('title').focus();
@@ -294,13 +252,6 @@
           }
           body.thoughts = byId('thoughts').value.trim();
           body.tags = byId('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
-          body.transcript = byId('transcript').value;
-          body.transcript_source = transcriptSource;
-          body.input_kind = byId('input-kind').value;
-          body.transcript_url = transcriptUrl;
-          body.analysis_input = analysisSnapshot?.content || '';
-          body.analysis_input_kind = analysisSnapshot?.kind || 'unknown';
-          body.analysis_basis = analysisSnapshot?.basis || '';
           await request('/api/journals' + (editingId === null ? '' : '/' + editingId), {
             method: editingId === null ? 'POST' : 'PUT', body: JSON.stringify(body)
           });

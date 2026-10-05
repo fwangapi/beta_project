@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand __tests__"
   },
   "keywords": [],
   "author": "",
@@ -14,9 +14,12 @@
   "type": "commonjs",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "cheerio": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.2",
     "express": "^5.2.1",
+    "fast-xml-parser": "^5.11.2",
+    "he": "^1.2.0",
     "openai": "^7.21.0",
     "sqlite": "^5.1.1",
     "sqlite3": "^6.0.1",

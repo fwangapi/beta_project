@@ -9,6 +9,7 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
 const path = require('path');
+const { fetchAppleRssTranscript } = require('./apple_rss');
 
 const app = express();
 app.use(cors());
@@ -232,8 +233,8 @@ app.post('/api/journals', async (req, res) => {
   if (typeof transcript !== 'string') {
     return res.status(400).json({ error: 'transcript must be text.' });
   }
-  if (!['youtube', 'manual'].includes(transcriptSource)) {
-    return res.status(400).json({ error: 'New entries must use transcript_source youtube or manual.' });
+  if (!['youtube', 'apple_podcast', 'manual'].includes(transcriptSource)) {
+    return res.status(400).json({ error: 'transcript_source must be youtube, apple_podcast, or manual.' });
   }
   if (req.body.thoughts !== undefined && req.body.thoughts !== null &&
       typeof req.body.thoughts !== 'string') {
@@ -441,6 +442,38 @@ async function withTimeout(task, ms) {
 // ==========================================
 
 // 🎬 Fetch YouTube Transcript
+app.post('/api/transcript/apple', async (req, res) => {
+  const { url = '', episodeTitle, episodeDescription = '', publisherUrl = '' } = req.body ?? {};
+  if (typeof url !== 'string' || typeof episodeDescription !== 'string' || typeof publisherUrl !== 'string') {
+    return res.status(400).json({ error: 'url, episodeDescription and publisherUrl must be text.' });
+  }
+  if (episodeTitle !== undefined && typeof episodeTitle !== 'string') {
+    return res.status(400).json({ error: 'episodeTitle must be text.' });
+  }
+
+  try {
+    const result = await fetchAppleRssTranscript(url.trim(), episodeTitle || '', episodeDescription, {
+      publisherUrl: publisherUrl.trim(),
+      fetchYouTubeTranscript: async youtubeUrl => {
+        const id = videoIdFrom(youtubeUrl);
+        if (!id) throw new Error('The publisher did not link a specific YouTube video.');
+        const fetchTranscript = transcriptLibrary.fetchTranscript ||
+          transcriptLibrary.YoutubeTranscript?.fetchTranscript.bind(transcriptLibrary.YoutubeTranscript);
+        if (!fetchTranscript) throw new Error('Unsupported youtube-transcript package version.');
+        const items = await withTimeout(fetchTranscript(id, { lang: 'en' }), 12000);
+        if (!items?.length) throw new Error('No English captions found for the linked podcast video.');
+        return items.map(item => item.text.replace(/&amp;#39;/g, "'").replace(/&quot;/g, '"')).join(' ');
+      }
+    });
+    return res.json(result);
+  } catch (error) {
+    const status = error.status || 502;
+    if (status >= 500) console.error('Apple Podcasts transcript fetch failed:', error);
+    return res.status(status).json({ error: error.message, code: error.code || 'RETRIEVAL_FAILED',
+      retrieval_status: 'not_retrieved', ...(error.details || {}) });
+  }
+});
+
 app.post('/api/transcript',  async (req, res) => {
   const { url } = req.body;
   const videoId = videoIdFrom(url);

@@ -1,122 +1,78 @@
 # Beta Journal
 
-Beta Journal is a small local web app for turning YouTube videos or pasted
-transcripts into searchable journal entries. It can fetch a video's captions,
-ask DeepSeek for a title, summary, and tags, and save the AI summary separately
-from your personal thoughts.
+Beta Journal is a local web app for creating searchable journal entries from
+YouTube captions or manually pasted text. It can suggest a title, summary, and
+tags using DeepSeek, then saves the summary, personal thoughts, and source
+transcript separately in SQLite.
 
-The app is designed to run on your own computer. The browser UI, Node.js server,
-and SQLite database are local; AI analysis is sent from the server to DeepSeek.
-YouTube transcript fetching uses an unofficial interface and can be blocked or
-rate-limited by YouTube. The fetch action requests English captions; it reports
-an error rather than silently loading the video's first available language when
-English captions are unavailable.
+The active v4 app fetches English captions from YouTube only. YouTube's caption
+interface is unofficial and may be blocked or rate-limited; if captions are
+unavailable, paste text manually. The app does not download audio or generate
+transcripts with speech recognition.
 
-## Project map
+## Beta versions
+
+| Version | Functionality |
+|---|---|
+| **v1** | YouTube transcript fetching and AI-assisted journal entries. |
+| **v2** | Added Apple Podcasts RSS transcript retrieval. |
+| **v3** | Expanded Apple Podcasts retrieval with publisher transcript sources. |
+| **v4** | Rolled back active Apple functionality; YouTube transcript workflow only. |
+
+The `beta_youtube_rollback/` and `beta_apple/` folders are retained as backups.
+They are not loaded by the active app. The active frontend and API use the
+YouTube-only workflow; the database retains the additional transcript and
+provenance fields introduced during v2/v3 so existing data is not discarded.
+Apple-era dependencies remain installed for the archived code and are not used
+by the active v4 application.
+
+## Project files
 
 ```text
 beta/
-├── app.js                  Express app, API routes, DeepSeek integration,
-│                           transcript fetching, SQLite setup and migrations
-├── beta_digest.py          Email unsent journal entries using Gamma's Gmail settings
-├── index.js                Server entry point used by npm start / npm run dev
-├── public/
-│   └── index.html          Single-page frontend: form, browser logic and styles
-├── tests/
-│   └── test_beta_digest.py Python tests for digest rendering and delivery state
-├── __tests__/
-│   └── api.test.js         API, persistence and database migration tests
-├── check-models.js         Older Gemini model-listing helper; not used by app
+├── app.js                  Express API, DeepSeek integration, SQLite schema/migrations
+├── index.js                Server entry point (port 3001 by default)
+├── public/index.html       YouTube-only journal frontend
+├── __tests__/api.test.js   API, transcript, persistence, and migration tests
+├── beta_digest.py          Email unsent journal entries
+├── beta_apple/             Preserved Apple-era backup
+├── beta_youtube_rollback/  Preserved YouTube-only rollback snapshot
 ├── package.json            Dependencies and npm scripts
-├── package-lock.json       Exact dependency resolution for npm ci
-├── .gitignore              Excludes credentials, local databases and artifacts
-├── .env                    Local secrets; create this yourself, never commit it
-└── beta.db                 Local SQLite data; created on first run, not committed
+├── package-lock.json       Locked dependency versions
+└── .env                    Local secrets; create privately, never commit it
 ```
 
-## How a journal entry is created
+## Use the app
 
-1. Open the app and paste a transcript/article, or enter a YouTube URL and
-   choose **Fetch Transcript**.
-2. Choose **Suggest Title, Summary & Tags**. The browser sends the transcript
-   to the server's `/api/analyze` endpoint; the server calls DeepSeek and
-   returns a title, summary, and tags.
-3. Review or edit the generated **AI Summary** and add optional **My thoughts**.
-4. Choose **Save entry**. The server writes the journal fields to SQLite.
-5. The page loads saved entries from `/api/journals`; each entry can be edited,
-   deleted, or found by searching its tags.
-
-The raw transcript is used for analysis but is not saved as a journal field.
-The AI summary and human thoughts are stored independently.
-
-## Database
-
-SQLite creates a `journals` table in `beta.db` by default. Set `DATABASE_PATH`
-to use a different file. The database is local to the machine unless you
-manually move it.
-
-```text
-journals
-├── id          INTEGER  Primary key, assigned by SQLite
-├── title       TEXT     Entry title
-├── ai_summary  TEXT     Generated summary; editable in the web form
-├── thoughts    TEXT     Optional personal notes; editable separately
-├── source      TEXT     Video URL or other source description
-├── created_at  TEXT     Creation timestamp, defaults to SQLite current time
-└── tags_json   TEXT     Tags stored as JSON text, e.g. ["ai", "hardware"]
-
-beta_digest_deliveries
-├── journal_id  INTEGER  Journal entry ID, primary key
-├── sent_at     TEXT     Time sent or baselined
-└── status      TEXT     "sent" after email, or "baseline" for pre-existing rows
-```
-
-The API converts `tags_json` to a `tags` array for the frontend. Startup runs
-schema migrations so older databases can be upgraded while preserving entry
-IDs, summaries, tags, and timestamps. Newer schema versions use `ai_summary`
-for the former `content` column and `thoughts` for the former `ai_summary`
-column. When migrating rows created during the earlier duplicate-backfill
-period, identical summary values are kept as `ai_summary` and not copied into
-`thoughts`.
-
-Back up the database before experimenting with migrations. To transfer entries
-to another computer, stop the app and copy `beta.db` privately; do not commit
-the database or synchronize it while the app is writing to it.
-
-## Backend API
-
-The Express server serves `public/` and provides these JSON endpoints:
-
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/api/journals` | List entries; optional `?search=tag` searches tags |
-| `GET` | `/api/journals/:id` | Read one entry |
-| `POST` | `/api/journals` | Create an entry |
-| `PUT` | `/api/journals/:id` | Update supplied entry fields |
-| `DELETE` | `/api/journals/:id` | Delete an entry |
-| `POST` | `/api/transcript` | Fetch YouTube captions from a URL or video ID |
-| `POST` | `/api/analyze` | Generate title, summary, and tags with DeepSeek |
-
-`APP_PASSWORD` is required for AI analysis. The browser asks for it when first
-calling the protected analysis endpoint and keeps it in memory for that page
-session. Transcript fetching and journal CRUD are not password-protected in the
-current implementation; keep this app on a trusted local machine/network.
-`DEEPSEEK_API_KEY` is only read by the server and must never be put in the
-frontend.
-
-## Requirements and local setup
-
-- Node.js 18 or newer
-- A DeepSeek API key for AI analysis
-- An application password for AI analysis
-
-Install the locked dependencies:
+Start the server:
 
 ```sh
-npm ci
+npm start
 ```
 
-Create `.env` in the project root:
+Or run `node app.js`. Open <http://localhost:3001>; set `PORT` to choose another
+port. Do not open `public/index.html` directly from the filesystem, because the
+page calls the server's relative `/api/...` routes.
+
+The form lets you fetch a video's English captions or paste transcript/article
+text. Choose the text type, request **Suggest Title, Summary & Tags**, review
+the result, then save the entry. The AI request sends only the text in the form
+to DeepSeek; it does not fetch a transcript, listen to audio, or browse the web.
+The application password protects AI analysis.
+
+Fetched captions appear in the dedicated transcript textbox and are saved in
+the `transcript` column with `transcript_source = youtube`. Manually supplied
+text is marked `manual`. Saved entries can be edited, including their saved
+transcript; entries with a transcript display it in an expandable section.
+The app also saves the exact source text and input type used for the last
+analysis, separately from the current transcript, so edits do not overwrite the
+analysis record.
+
+## Configuration
+
+Requirements: Node.js 18 or newer, a DeepSeek API key, and an application
+password. Install locked dependencies with `npm ci`. Create `.env` in the
+project root:
 
 ```dotenv
 APP_PASSWORD=choose-a-private-password
@@ -127,86 +83,114 @@ DEEPSEEK_API_KEY=your-deepseek-api-key
 # DATABASE_PATH=/path/to/beta.db
 ```
 
-Start the server:
+`APP_PASSWORD` is required before AI analysis is available. The browser asks for
+the password when needed and keeps it in memory for that page session.
+`DEEPSEEK_API_KEY` is server-only. Transcript fetching and journal CRUD are not
+password-protected, so keep the app on a trusted local machine or network.
 
-```sh
-node app.js
-```
+## Database
 
-Alternatively, `npm start` runs `index.js`, and `npm run dev` starts it with
-nodemon. Open <http://localhost:3000>. Set `PORT` to use another port. Do not
-open `public/index.html` directly from the filesystem; the frontend calls the
-server's relative `/api/...` routes.
+SQLite creates a `journals` table in `beta.db` by default. The app migrates
+older databases on startup and keeps the complete schema, including fields
+added during the Apple experiments:
 
-## Tests and development
+| Column | Purpose |
+|---|---|
+| `id` | SQLite-generated unique entry ID. |
+| `title` | Entry title, suggested by AI or edited by you. |
+| `source` | Source reference, typically the YouTube URL. |
+| `created_at` | Creation timestamp, generated by SQLite. |
+| `ai_summary` | AI-generated summary, kept separate from your own thoughts. |
+| `thoughts` | Your optional personal notes or reflections. |
+| `tags_json` | Tags stored as JSON text; the API converts them to a tag array for the frontend. |
+| `transcript` | Source text. A fetched YouTube transcript is saved here; manually pasted text can also be saved here. |
+| `transcript_source` | How the transcript text was supplied. New YouTube captions use `youtube`; manually pasted text uses `manual`. Existing legacy values are retained. |
+| `input_kind` | Text classification: `transcript`, `episode_notes`, `article`, or `unknown`. |
+| `transcript_url` | Retained provenance field, primarily for entries created by earlier versions. |
+| `analysis_input` | Exact text sent for the most recent AI analysis, preserved separately from the current editable transcript. |
+| `analysis_input_kind` | Classification of the text used for that analysis. |
+| `analysis_basis` | Explanation of the source material on which the AI summary was based. |
+
+### How journal data is saved
+
+Fetching captions fills the transcript textbox. When you save an entry, the
+frontend sends the transcript, its source, title, AI summary, personal thoughts,
+tags, and analysis provenance to the API. The API writes them to one row in
+`journals`. The `tags` array is serialized into `tags_json` for storage and
+converted back to an array when entries are returned to the frontend.
+
+When you edit an entry, its saved transcript and provenance are loaded back
+into the form. Saving the edit updates the same database row. The analysis
+snapshot is distinct from the current transcript: if you change transcript
+text after running analysis, the saved snapshot continues to show which exact
+text was used for that summary.
+
+The v4 rollback changed the active frontend and transcript retrieval workflow,
+not the database schema. The schema retains the extra fields introduced during
+the Apple experiments, and existing values are preserved; active v4 does not
+fetch Apple transcripts. Migrations add missing columns to older databases
+without inferring that a URL proves a transcript was retrieved. Legacy
+`episode_notes`, `article`, `unknown`, and Apple transcript provenance values
+remain representable for records made by earlier versions, while new entries
+use the active YouTube/manual workflow.
+
+Older records are not classified as transcripts merely because a source URL is
+present. Existing Apple-era source and provenance values are retained when
+read or edited. Back up `beta.db` before experimenting with migrations. Stop
+the app before privately copying the database; never commit it or sync it while
+the app is writing.
+
+## API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/journals` | List entries; optional `?search=tag` searches tags. |
+| `GET` | `/api/journals/:id` | Read one entry. |
+| `POST` | `/api/journals` | Create an entry, including transcript and provenance fields. |
+| `PUT` | `/api/journals/:id` | Update supplied entry fields. |
+| `DELETE` | `/api/journals/:id` | Delete an entry. |
+| `POST` | `/api/transcript` | Fetch English YouTube captions from a URL or video ID. |
+| `POST` | `/api/analyze` | Generate a title, summary, and tags with DeepSeek. |
+
+There is no active Apple transcript endpoint in v4.
+
+## Tests
+
+Run the API and database tests with:
 
 ```sh
 npm test
 ```
 
-The Jest/Supertest suite covers the journal API, summary/thought persistence,
-the protected analysis route, and upgrading an old database schema. The
-Python standard-library tests cover the Beta email digest without contacting
-Gmail. Tests use temporary databases and do not make live DeepSeek or YouTube
-requests.
-
-Useful starting points:
-
-- Frontend markup and browser-side request handling: `public/index.html`
-- API endpoints, input validation, AI provider, and transcript integration:
-  `app.js`
-- Database creation and compatibility migrations: `app.js`, near
-  `createJournalTable`, `migrateOldJournalTable`, and `migrateJournalColumns`
-- API and migration examples: `__tests__/api.test.js`
+Tests cover YouTube caption retrieval and unavailable captions, journal
+transcript/provenance persistence, the removed Apple endpoint, authentication,
+CRUD operations, and migration of legacy database columns. Transcript fetch
+tests mock the YouTube client; tests do not call DeepSeek or spend AI tokens.
 
 ## Email new journal entries
 
-`beta_digest.py` sends newly saved summaries and optional thoughts as an email
-with both HTML and plain-text alternatives. It reads `GMAIL_SENDER`,
+`beta_digest.py` sends new summaries and optional thoughts as an email with
+HTML and plain-text alternatives. By default it reads `GMAIL_SENDER`,
 `GMAIL_APP_PASSWORD`, and `GMAIL_RECEIVER` from the sibling Gamma project's
-`.env` by default (`../gamma/.env`). It sends one digest for all pending
-entries and records delivery state in a `beta_digest_deliveries` table. Gmail
-delivery is recorded only after the message is accepted.
+`.env` (`../gamma/.env`). It records delivery state in the
+`beta_digest_deliveries` table only after Gmail accepts the message.
 
-The first normal run establishes a baseline and does not email entries already
-in the database. Later entries are included in the next digest. Use
-`--include-existing` on the first real run if you want a one-time email of
-existing entries instead.
-
-Preview what would be sent without sending or marking entries:
+The first normal run establishes a baseline without emailing entries already
+in the database. Preview without sending or marking entries:
 
 ```sh
 ../gamma/gamma/bin/python beta_digest.py --dry-run
 ```
 
-On the first dry run, the script explains that existing entries would be
-baselined; it does not create delivery state. Run it manually with Gamma's
-Python virtual environment, or let Gamma's `run_pipeline.py` invoke it after
-the market report when the Beta project and `beta.db` are available at
-`../beta`. Set `BETA_PROJECT_ROOT` and optionally `BETA_DATABASE_PATH` in the
-pipeline environment if the projects or database are elsewhere. The digest is
-a separate email from Gamma's market report, keeping report generation
-independent.
-
-## Change history
-
-The Git history records the project evolving in these main steps:
-
-| Commit | Change |
-|---|---|
-| `c515015` — Initial commit | Added the Express/SQLite journal, browser page, transcript and AI experiments, and the initial test/dependency setup. |
-| `7ab0867` — PORT and authentication | Made the server use the hosting-provided `PORT` and added an application-password gate for AI analysis. |
-| `5138941` — Password prompt and app startup | Reworked the frontend request/password flow, improved error handling and brought `node app.js` startup support into the main server file. |
-| `2c0f191` — Separate summaries and thoughts | Renamed the saved summary field to `ai_summary`, added the independent `thoughts` field and form, migrated older database schemas, and documented local setup. |
-| `ecd7b73` — Authentication test | Updated the analysis test to assert the intended unauthorized response when no application password is supplied. |
-
-The provider implementation currently uses DeepSeek's OpenAI-compatible chat
-API. The completion request allows up to 100,000 output tokens, subject to
-DeepSeek model/context limits and the size of the input.
+Use `--include-existing` on the first real run to email existing entries once.
+Gamma's `run_pipeline.py` can invoke the digest after the market report when
+Beta and `beta.db` are available at `../beta`; set `BETA_PROJECT_ROOT` or
+`BETA_DATABASE_PATH` if they are elsewhere. The digest is a separate email
+from Gamma's market report.
 
 ## Local data and secrets
 
 `.env`, `beta.db`, SQLite journal files, and `node_modules/` are excluded from
-Git. Never commit API keys or personal journal data. On a second computer,
+Git. Never commit API keys or personal journal data. On another computer,
 clone the code, create a private `.env`, install dependencies, and either start
-with a fresh database or copy a closed `beta.db` file privately.
+with a fresh database or privately copy a closed `beta.db` file.

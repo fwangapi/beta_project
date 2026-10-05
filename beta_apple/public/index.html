@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+  <head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Beta Journal</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #1e293b; background: #f8fafc; }
+      * { box-sizing: border-box; } body { margin: 0; }
+      main { max-width: 920px; margin: auto; padding: 32px 16px 64px; }
+      h1 { margin-bottom: 4px; } h2 { font-size: 1.15rem; margin-top: 0; }
+      .muted { color: #64748b; line-height: 1.5; }
+      .panel, article { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-top: 20px; }
+      label { display: block; font-weight: 650; font-size: .9rem; margin: 14px 0 6px; }
+      input, textarea, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; padding: 10px; font: inherit; }
+      textarea { min-height: 100px; resize: vertical; } button { border: 0; border-radius: 7px; padding: 9px 13px; font: inherit; font-weight: 650; cursor: pointer; background: #2563eb; color: white; }
+      button.secondary { color: #1e40af; background: #e0e7ff; } button.danger { color: #b91c1c; background: #fee2e2; }
+      .actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; } .hidden { display: none; }
+      .error { color: #b91c1c; } .success { color: #15803d; } .entry-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+      .entry-head h2 { margin-bottom: 3px; } .entry-content { white-space: pre-wrap; line-height: 1.55; }
+      .tag { display: inline-block; background: #e0e7ff; color: #3730a3; border-radius: 999px; padding: 3px 8px; margin: 2px 4px 0 0; font-size: .8rem; }
+      #search { margin-top: 16px; } @media (max-width: 560px) { .entry-head { display: block; } }
+    </style>
+
+  </head>
+  <body>
+    <main>
+      <h1>Beta Project</h1>
+ 
+      <p class="muted">Fetch a transcript, review the source text, then generate and save a summary.</p>
+
+      <section class="panel">
+        <h2 id="form-heading">New journal entry</h2>
+
+
+        <form id="journal-form">
+
+          <!-- YouTube retrieval remains separate from paid AI analysis. -->
+          <label for="yt-url">Import directly from YouTube</label>
+          <div style="display: flex; gap: 8px;">
+          <input id="yt-url" placeholder="https://www.youtube.com/watch?v=...">
+          <button id="yt-fetch-btn" type="button" class="secondary" style="white-space: nowrap;">
+        📥 Fetch Transcript
+          </button>
+          </div>
+
+<!-- Apple Podcasts: matching hints are not transcripts. -->
+<fieldset style="border: 1px solid #e2e8f0; border-radius: 8px; margin: 18px 0; padding: 14px;">
+  <legend>Podcasts — retrieve a transcript</legend>
+  <label for="apple-url">Apple Podcasts episode link</label>
+  <input id="apple-url" placeholder="https://podcasts.apple.com/au/podcast/.../id...?i=...">
+  <label for="publisher-url">Publisher episode / transcript URL (optional)</label>
+  <input id="publisher-url" type="url" placeholder="https://www.theverge.com/podcast/... or https://practicalai.show/339/transcript">
+  <p class="muted">Try the Apple link first. If it fails, add the publisher’s episode/transcript page and retry. A publisher URL also works by itself. This retrieves existing text; it does not transcribe audio.</p>
+  <button id="apple-fetch-btn" type="button" class="secondary" style="margin-top: 10px;">
+    📥 Find Podcast Transcript
+  </button>
+  <details id="apple-fallback" style="margin-top: 12px;">
+    <summary>Need help matching? Add the exact title and description, then retry</summary>
+    <label for="apple-episode-title">Exact episode title</label>
+    <input id="apple-episode-title" placeholder="The publisher’s exact episode title">
+    <label for="apple-description">Episode description / matching excerpt</label>
+    <textarea id="apple-description" placeholder="Paste the episode description here. This is NOT a transcript."></textarea>
+    <p class="muted">These fields help identify the RSS episode. They do not create a transcript.</p>
+    <button id="apple-notes-btn" type="button" class="secondary">
+      Use title &amp; description as notes instead
+    </button>
+    <p class="muted">This loads notes for analysis; it does not fetch a transcript or call AI.</p>
+  </details>
+  <p id="apple-status" role="status" aria-live="polite" class="muted">
+    No podcast transcript retrieved. Checks RSS, supported publisher pages, and a specific linked YouTube video when available.
+  </p>
+  <div id="apple-transcript-panel" class="hidden">
+    <label for="apple-transcript">Retrieved podcast transcript / captions</label>
+    <textarea id="apple-transcript" readonly style="min-height: 220px;"></textarea>
+    <p id="apple-transcript-origin" class="muted"></p>
+    <p class="muted">This exact text is used for analysis and saved when you choose Save entry.</p>
+    <button id="manual-mode-btn" type="button" class="secondary">Use pasted text instead</button>
+  </div>
+</fieldset>
+
+<div id="manual-input-panel">
+  <label id="transcript-label" for="transcript">Paste article or transcript / fetched YouTube captions</label>
+  <textarea id="transcript" placeholder="Paste text here, or fetch YouTube captions above."></textarea>
+  <div id="input-kind-panel">
+    <label for="input-kind">What kind of text is this?</label>
+    <select id="input-kind">
+      <option value="unknown">Other / unverified pasted text</option>
+      <option value="transcript">Transcript (supplied by you)</option>
+      <option value="article">Article</option>
+      <option value="episode_notes">Episode title &amp; description only — not a transcript</option>
+    </select>
+  </div>
+</div>
+<input id="transcript-source" type="hidden" value="manual">
+<p id="input-status" class="muted">No text loaded for analysis.</p>
+<p id="analysis-basis" class="muted">AI summarizes only the loaded text. It does not search the web or listen to the episode.</p>
+
+          <button id="ai-analyze" type="button" class="secondary" style="margin: 10px 0; width: 100%;">
+            ✨ Suggest Title, Summary & Tags
+          </button>
+          <p role="status" aria-live="polite" id="ai-status" class="muted" style="font-size: 0.85rem; min-height: 20px;"></p>
+
+          <label for="title">Title</label>
+          <input id="title" required placeholder="A brief thought worth remembering">
+
+          <label for="ai-summary">AI Summary</label>
+          <textarea id="ai-summary" required placeholder="Generate or edit the AI summary…"></textarea>
+
+          <label for="thoughts">My thoughts</label>
+          <textarea id="thoughts" placeholder="Add your own thoughts or reflections…"></textarea>
+
+          <label for="source">Source</label>
+          <input id="source" required placeholder="Article URL, podcast episode, or publication name">
+
+          <label for="tags">Tags</label>
+          <input id="tags" placeholder="e.g. health, ai_infra, energy, ai_algo, semi, network">
+          <p class="muted">Separate tags with commas.</p>
+          <div class="actions"><button id="save" type="submit">Save entry</button><button id="cancel" class="secondary hidden" type="button">Cancel edit</button><span id="message" role="status"></span></div>
+        </form>
+      </section>
+
+      <input id="search" placeholder="Search tags, e.g. sqlite">
+      <section id="entries" aria-live="polite"></section>
+    </main>
+
+    <script>
+      // Define helpers BEFORE registering event handlers.
+      const byId = id => document.getElementById(id);
+      let accessCode = ''; // Keep the password in memory, not persistent storage.
+      try { localStorage.removeItem('journal_access_code'); } catch {}
+
+      async function request(path, options = {}, allowPrompt = false) {
+        if (location.protocol === 'file:') throw new Error('Open http://localhost:3001 after starting the Node server.');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 100000);
+        let res;
+        try {
+          res = await fetch(path, { ...options, signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', ...options.headers,
+              ...(accessCode ? { 'x-access-code': accessCode } : {}) } });
+        } catch (error) {
+          throw new Error(error.name === 'AbortError' ? 'Request timed out. Try again later.' : 'Cannot reach the server. Check that it is running.');
+        } finally { clearTimeout(timer); }
+        if (res.status === 401) {
+          accessCode = '';
+          if (allowPrompt) {
+            const entered = prompt('🔒 Enter the application password:');
+            if (!entered) throw new Error('Cancelled. No AI request was authorized.');
+            accessCode = entered;
+            return request(path, options, false);
+          }
+        }
+        if (res.status === 204) return null;
+        let data;
+        try { data = await res.json(); }
+        catch { throw new Error(`Server returned HTTP ${res.status} without JSON. Check the server URL and logs.`); }
+        if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (HTTP ${res.status}).`), { data, status: res.status });
+        return data;
+      }
+
+      let transcriptUrl = '';
+      let analysisSnapshot = null;
+      const kindLabels = {
+        transcript: 'Transcript text', episode_notes: 'Episode title/description only — NOT a transcript',
+        article: 'Article text', unknown: 'Unverified pasted text'
+      };
+      function inputInfo() {
+        const kind = byId('input-kind').value;
+        const source = byId('transcript-source').value;
+        const chars = byId('transcript').value.length;
+        byId('input-status').textContent = chars
+          ? `${kindLabels[kind]}. ${chars.toLocaleString()} characters. Source: ${source === 'apple_podcast' ? 'retrieved podcast text (see source URL)'  : source === 'youtube' ? 'YouTube captions' : 'supplied text'}.`
+          : 'No text loaded for analysis.';
+      }
+      function markInputChanged() {
+        const changed = analysisSnapshot && (analysisSnapshot.content !== byId('transcript').value ||
+          analysisSnapshot.kind !== byId('input-kind').value);
+        byId('analysis-basis').textContent = changed
+          ? 'Text changed after analysis. The saved summary still refers to the earlier input; regenerate it or review before saving.'
+          : analysisSnapshot?.basis || 'AI summarizes only the loaded text. No web search or audio listening.';
+        byId('analysis-basis').className = changed ? 'muted error' : 'muted';
+        inputInfo();
+      }
+      function loadInput(content, source, kind, url = '', sourceUrl = '') {
+        byId('transcript').value = content;
+        byId('transcript-source').value = source;
+        byId('input-kind').value = kind;
+        transcriptUrl = url;
+        if (sourceUrl) byId('source').value = sourceUrl;
+        analysisSnapshot = null;
+        byId('ai-summary').value = '';
+        byId('title').value = '';
+        byId('tags').value = '';
+        const podcast = source === 'apple_podcast' && kind === 'transcript';
+        byId('apple-transcript-panel').classList.toggle('hidden', !podcast);
+        byId('manual-input-panel').classList.toggle('hidden', podcast);
+        byId('input-kind-panel').classList.toggle('hidden', source === 'youtube');
+        byId('apple-transcript').value = podcast ? content : '';
+        byId('apple-transcript-origin').textContent = podcast ? `Transcript download: ${url || 'URL not recorded'}` : '';
+        byId('transcript-label').textContent = kind === 'episode_notes'
+          ? 'Episode title & description — NOT a transcript'
+          : 'Paste article or transcript / fetched YouTube captions';
+        markInputChanged();
+      }
+      function setBusy(busy) {
+        for (const id of ['yt-fetch-btn', 'apple-fetch-btn', 'ai-analyze', 'apple-notes-btn', 'manual-mode-btn', 'save', 'cancel']) {
+          byId(id).disabled = busy;
+        }
+      }
+      byId('transcript').addEventListener('input', () => {
+        byId('transcript-source').value = 'manual';
+        transcriptUrl = '';
+        byId('input-kind-panel').classList.remove('hidden');
+        markInputChanged();
+      });
+      byId('input-kind').addEventListener('change', markInputChanged);
+      byId('manual-mode-btn').addEventListener('click', () => loadInput('', 'manual', 'unknown'));
+      byId('apple-notes-btn').addEventListener('click', () => {
+        const title = byId('apple-episode-title').value.trim();
+        const description = byId('apple-description').value.trim();
+        if (!title || description.length < 20) {
+          byId('apple-status').textContent = 'Enter a title and at least 20 characters of description. No transcript or AI output was produced.';
+          byId('apple-status').className = 'muted error';
+          return;
+        }
+        loadInput(`Episode title: ${title}\n\nEpisode description:\n${description}`,
+          'manual', 'episode_notes', '', byId('apple-url').value.trim());
+        byId('apple-status').textContent = 'Using title/description only. No transcript is loaded. Suggest Title, Summary & Tags will summarize these notes only.';
+        byId('apple-status').className = 'muted';
+        byId('ai-status').textContent = 'Notes loaded. No AI call has been made yet.';
+      });
+      for (const id of ['apple-url', 'publisher-url', 'apple-episode-title', 'apple-description']) byId(id).addEventListener('input', () => {
+        if (byId('transcript-source').value === 'apple_podcast') loadInput('', 'manual', 'unknown');
+        byId('apple-status').textContent = 'Podcast source or matching hints changed. Retrieve its transcript before analyzing it.';
+        byId('apple-status').className = 'muted';
+      });
+
+      // ==========================================
+      // 🎬 YouTube Fetch 按钮逻辑
+      // ==========================================
+      byId('yt-fetch-btn').addEventListener('click', async () => {
+        const url = byId('yt-url').value.trim();
+        const status = byId('ai-status');
+
+        if (!url) {
+          status.textContent = 'Please enter a YouTube link first.';
+          status.className = 'muted error';
+          return;
+        }
+
+        setBusy(true);
+        status.textContent = '⏳ Pulling transcript from YouTube...';
+        status.className = 'muted';
+
+        try {
+          const data = await request('/api/transcript', {
+            method: 'POST', body: JSON.stringify({ url })
+          }, false);
+
+          loadInput(data.transcript, 'youtube', 'transcript', '', url);
+          status.textContent = '✅ Transcript loaded! Now click "Suggest Title, Summary & Tags".';
+          status.className = 'muted success';
+        } catch (err) {
+          status.textContent = '❌ ' + err.message;
+          status.className = 'muted error';
+        } finally {
+          setBusy(false);
+        }
+      });
+      
+      // ==========================================
+      // 🎬 Apple Podcasts RSS transcript
+      // ==========================================
+      
+byId('apple-fetch-btn').addEventListener('click', async () => {
+  const url = byId('apple-url').value.trim();
+  const publisherUrl = byId('publisher-url').value.trim();
+  const identity = ['apple-url', 'publisher-url', 'apple-episode-title', 'apple-description'].map(id => byId(id).value).join('\n');
+  const status = byId('apple-status');
+  if (!url && !publisherUrl) {
+    status.textContent = 'Enter an Apple Podcasts episode link or a supported publisher episode/transcript URL.';
+    status.className = 'muted error';
+    return;
+  }
+  // Never retain an earlier podcast transcript as if this retry retrieved it.
+  if (byId('transcript-source').value === 'apple_podcast') loadInput('', 'manual', 'unknown');
+  setBusy(true);
+  status.textContent = 'Checking RSS and supported publisher pages; trying a specific linked video if needed… No AI call is being made.';
+  status.className = 'muted';
+  try {
+    const data = await request('/api/transcript/apple', {
+      method: 'POST', body: JSON.stringify({
+        url, publisherUrl, episodeTitle: byId('apple-episode-title').value.trim(),
+        episodeDescription: byId('apple-description').value.trim()
+      })
+    }, false);
+    if (identity !== ['apple-url', 'publisher-url', 'apple-episode-title', 'apple-description'].map(id => byId(id).value).join('\n')) throw new Error('Podcast source changed during retrieval. Retry with the current values.');
+    if (typeof data.transcript !== 'string' || !data.transcript.trim()) throw new Error('No readable transcript was returned.');
+    loadInput(data.transcript, 'apple_podcast', 'transcript', data.transcriptUrl, data.source || url);
+    const via = data.transcriptSource === 'publisher-youtube-captions' ? 'YouTube captions linked by the publisher' : data.transcriptSource === 'publisher-website' ? 'publisher website' : 'publisher RSS transcript link';
+    status.textContent = `Retrieved from ${via}: ${data.title}. Review the text below before summarizing.`;
+    byId('apple-transcript-origin').textContent = `Source: ${data.transcriptUrl}. ${data.transcript.length.toLocaleString()} characters. ${via}.`;
+    status.className = 'muted success';
+    byId('ai-status').textContent = 'Transcript retrieved. AI analysis has not run yet.';
+  } catch (error) {
+    status.textContent = error.message + ' No podcast transcript was loaded by this request.';
+    status.className = 'muted error';
+    byId('apple-fallback').open = true;
+    if (!byId('apple-episode-title').value && error.data?.episodeTitle) {
+      byId('apple-episode-title').value = error.data.episodeTitle;
+    }
+    byId('ai-status').textContent = byId('transcript').value
+      ? 'Existing text remains in the form. Analysis will use that text, not a transcript of the failed podcast request.'
+      : 'No text to analyze. Retry retrieval, paste a transcript, or explicitly use title/description as notes.';
+  } finally { setBusy(false); }
+});
+
+      // ==========================================
+      // 🤖 AI Analyze 按钮逻辑
+      // ==========================================
+      byId('ai-analyze').addEventListener('click', async () => {
+        const content = byId('transcript').value;
+        const kind = byId('input-kind').value;
+        const status = byId('ai-status');
+
+        if (content.length < 20) {
+          status.textContent = 'Please paste more content first.';
+          status.className = 'muted error';
+          return;
+        }
+
+        setBusy(true);
+        status.textContent = '🤖 AI is thinking...';
+        status.className = 'muted';
+
+        try {
+          const data = await request('/api/analyze', {
+            method: 'POST', body: JSON.stringify({ content, input_kind: kind })
+          }, true);
+
+          if (data.title) byId('title').value = data.title;
+          if (data.summary) byId('ai-summary').value = data.summary;
+          if (data.tags) byId('tags').value = data.tags.join(', ');
+
+          analysisSnapshot = { content, kind, basis: data.analysis_basis || 'Based on the supplied text only; no web search.' };
+          markInputChanged();
+          status.textContent = kind === 'episode_notes'
+            ? '✅ Notes-only summary generated. The full podcast transcript was not used.'
+            : '✅ Done! Review and edit before saving.';
+          status.className = 'muted success';
+        } catch (e) {
+          status.textContent = '❌ ' + e.message;
+          status.className = 'muted error';
+        } finally {
+          setBusy(false);
+        }
+      });
+      let editingId = null;
+      let loadSequence = 0;
+      function message(text, error = false) {
+        byId('message').textContent = text;
+        byId('message').className = error ? 'error' : 'success';
+      }
+      function resetForm() {
+        editingId = null;
+        byId('journal-form').reset();
+        byId('form-heading').textContent = 'New journal entry';
+        byId('cancel').classList.add('hidden');
+        byId('ai-status').textContent = '';
+        transcriptUrl = '';
+        analysisSnapshot = null;
+        byId('apple-status').textContent = 'No podcast transcript retrieved.';
+        byId('apple-status').className = 'muted';
+        byId('apple-fallback').open = false;
+        byId('publisher-url').value = '';
+        loadInput('', 'manual', 'unknown');
+      }
+      function element(tag, text, className) {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      }
+      async function loadEntries() {
+        const sequence = ++loadSequence;
+        try {
+          const entries = await request('/api/journals?search=' + encodeURIComponent(byId('search').value));
+          if (sequence !== loadSequence) return;
+          byId('entries').replaceChildren();
+          for (const entry of entries) {
+            const article = document.createElement('article');
+            article.append(element('h2', entry.title), element('p', entry.source, 'muted'),
+              element('h3', 'AI Summary'), element('div', entry.ai_summary, 'entry-content'));
+            if (entry.thoughts) {
+              article.append(element('h3', 'My thoughts'), element('div', entry.thoughts, 'entry-content'));
+            }
+            if (entry.analysis_basis) article.append(element('p', entry.analysis_basis, 'muted'));
+            if (entry.transcript) {
+              const transcriptDetails = document.createElement('details');
+              transcriptDetails.append(element('summary', `Saved source text: ${kindLabels[entry.input_kind] || kindLabels.unknown}`));
+              transcriptDetails.append(element('div', entry.transcript, 'entry-content'));
+              if (entry.transcript_url) transcriptDetails.append(element('p', `Transcript download: ${entry.transcript_url}`, 'muted'));
+              article.append(transcriptDetails);
+            }
+            if (entry.analysis_input && entry.analysis_input !== entry.transcript) {
+              const exactInput = document.createElement('details');
+              exactInput.append(element('summary', 'Exact earlier text used to generate this summary'),
+                element('div', entry.analysis_input, 'entry-content'));
+              article.append(exactInput);
+            }
+            for (const tag of entry.tags) article.append(element('span', tag, 'tag'));
+            const actions = element('div', '', 'actions');
+            const edit = element('button', 'Edit', 'secondary');
+            edit.type = 'button';
+            edit.onclick = () => {
+              loadInput(entry.transcript || '', entry.transcript_source || 'manual', entry.input_kind || 'unknown', entry.transcript_url || '');
+              analysisSnapshot = entry.analysis_input ? { content: entry.analysis_input, kind: entry.analysis_input_kind || 'unknown', basis: entry.analysis_basis || 'Earlier analysis basis not recorded.' } : null;
+              byId('apple-url').value = /podcasts\.apple\.com/.test(entry.source || '') ? entry.source : '';
+              byId('publisher-url').value = '';
+              byId('apple-episode-title').value = '';
+              byId('apple-description').value = '';
+              editingId = entry.id;
+              for (const name of ['title', 'source']) byId(name).value = entry[name];
+              byId('ai-summary').value = entry.ai_summary || '';
+              byId('thoughts').value = entry.thoughts || '';
+              byId('transcript').value = entry.transcript || '';
+              byId('transcript-source').value = entry.transcript_source || 'manual';
+              byId('tags').value = entry.tags.join(', ');
+              byId('form-heading').textContent = 'Edit journal entry';
+              byId('cancel').classList.remove('hidden');
+              byId('apple-status').textContent = entry.transcript_source === 'apple_podcast' && entry.input_kind === 'transcript'
+                ? 'Saved publisher transcript loaded from this journal entry. No new retrieval has run.'
+                : 'No retrieved podcast transcript is recorded for this entry.';
+              byId('apple-status').className = 'muted';
+              markInputChanged();
+              byId('title').focus();
+            };
+            const remove = element('button', 'Delete', 'danger');
+            remove.type = 'button';
+            remove.onclick = async () => {
+              if (!confirm('Delete this journal entry?')) return;
+              try {
+                await request('/api/journals/' + entry.id, { method: 'DELETE' });
+                if (editingId === entry.id) resetForm();
+                await loadEntries();
+              } catch (error) { message(error.message, true); }
+            };
+            actions.append(edit, remove); article.append(actions);
+            byId('entries').append(article);
+          }
+        } catch (error) { if (sequence === loadSequence) message(error.message, true); }
+      }
+      byId('journal-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        byId('save').disabled = true;
+        try {
+          const body = {};
+          for (const name of ['title', 'ai_summary', 'source']) {
+            const field = name === 'ai_summary' ? 'ai-summary' : name;
+            body[name] = byId(field).value.trim();
+          }
+          body.thoughts = byId('thoughts').value.trim();
+          body.transcript = byId('transcript').value;
+          body.transcript_source = byId('transcript-source').value;
+          body.input_kind = byId('input-kind').value;
+          body.transcript_url = transcriptUrl;
+          body.analysis_input = analysisSnapshot?.content || '';
+          body.analysis_input_kind = analysisSnapshot?.kind || 'unknown';
+          body.analysis_basis = analysisSnapshot?.basis || ''; 
+          body.tags = byId('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
+          await request('/api/journals' + (editingId === null ? '' : '/' + editingId), {
+            method: editingId === null ? 'POST' : 'PUT', body: JSON.stringify(body)
+          });
+          resetForm(); message('Saved.'); await loadEntries();
+        } catch (error) { message(error.message, true); }
+        finally { byId('save').disabled = false; }
+      });
+      byId('cancel').addEventListener('click', resetForm);
+      byId('search').addEventListener('input', loadEntries);
+      loadEntries();
+    </script>
+
+  </body>
+</html>
