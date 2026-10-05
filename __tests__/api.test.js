@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const request = require('supertest');
 const transcriptLibrary = require('youtube-transcript');
-const { app, initDb, closeDb } = require('../app');
+const { app, initDb, closeDb, parseModelJson } = require('../app');
 
 const testDatabase = path.join(__dirname, 'beta.test.db');
 const migrationDatabase = path.join(__dirname, 'beta.migration.test.db');
@@ -23,11 +23,24 @@ describe('Beta journal API', () => {
     jest.restoreAllMocks();
   });
 
+  it('parses a valid AI JSON object even when the provider appends trailing text', () => {
+    const result = parseModelJson('```json\n{"title":"A {test}","summary":"Summary","tags":["ai"]}\nDone.\n```');
+    expect(result).toEqual({ title: 'A {test}', summary: 'Summary', tags: ['ai'] });
+  });
+
+  it('reports incomplete or malformed AI JSON clearly', () => {
+    expect(() => parseModelJson('{"title":"incomplete"')).toThrow(/incomplete JSON object/i);
+    expect(() => parseModelJson('{"title":}')).toThrow(/invalid JSON/i);
+  });
+
   it('serves the small journal frontend', async () => {
     const response = await request(app).get('/');
     expect(response.status).toBe(200);
     expect(response.text).toContain('Beta Journal');
     expect(response.text).toContain('id="transcript"');
+    expect(response.text).toContain('id="transcript-entry-id"');
+    expect(response.text).toContain('id="retrieve-transcript"');
+    expect(response.text).toContain('id="retrieved-transcript"');
     expect(response.text).not.toContain('apple-fetch-btn');
   });
 
@@ -154,7 +167,12 @@ describe('Beta journal API', () => {
 
   it('searches, reads by ID, updates, and deletes a journal', async () => {
     const created = await request(app).post('/api/journals').send({
-      title: 'Learning APIs', ai_summary: 'Use stable IDs for edits.', source: 'Personal note', tags: ['backend', 'express']
+      title: 'Learning APIs',
+      ai_summary: 'Use stable IDs for edits.',
+      source: 'Personal note',
+      transcript: 'Saved transcript to retrieve by journal number.',
+      transcript_source: 'youtube',
+      tags: ['backend', 'express']
     });
     const id = created.body.id;
 
@@ -167,6 +185,7 @@ describe('Beta journal API', () => {
     expect(searched.body.some((entry) => entry.id === id)).toBe(true);
     expect(updated.status).toBe(200);
     expect(found.body.tags).toEqual(['backend', 'testing']);
+    expect(found.body.transcript).toBe('Saved transcript to retrieve by journal number.');
     expect(deleted.status).toBe(204);
     expect(missing.status).toBe(404);
   });

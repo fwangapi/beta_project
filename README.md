@@ -16,8 +16,10 @@ transcripts with speech recognition.
 |---|---|
 | **v1** | YouTube transcript fetching and AI-assisted journal entries. |
 | **v2** | Added Apple Podcasts RSS transcript retrieval. |
-| **v3** | Expanded Apple Podcasts retrieval with publisher transcript sources. |
-| **v4** | Rolled back active Apple functionality; YouTube transcript workflow only. |
+| **v3** 20261004 | Expanded Apple Podcasts retrieval with publisher transcript sources. |
+| **v4** 20261005 | Rolled back active Apple functionality; YouTube transcript workflow only. |
+| **v4.1** 20261005 | Added visible journal ID numbers and a UI to retrieve a saved original transcript by journal ID. |
+| **v4.15** 20261005 | Modified the deepseek prompt to increase the quality of summary and to add a Chinese translation of the summary at the end. |
 
 The `beta_youtube_rollback/` and `beta_apple/` folders are retained as backups.
 They are not loaded by the active app. The active frontend and API use the
@@ -58,7 +60,13 @@ The form lets you fetch a video's English captions or paste transcript/article
 text. Choose the text type, request **Suggest Title, Summary & Tags**, review
 the result, then save the entry. The AI request sends only the text in the form
 to DeepSeek; it does not fetch a transcript, listen to audio, or browse the web.
-The application password protects AI analysis.
+The application password protects AI analysis. The analysis prompt asks for a
+structured summary covering key claims, disagreements, mentioned entities,
+numbers, predictions, uncertainty/open questions, and practical takeaways. It
+instructs DeepSeek to distinguish transcript statements from opinions and
+uncertain or possibly misheard content, and not to silently correct garbled
+terms. Generated tags are normalized to lowercase and hyphens are changed to
+underscores.
 
 Fetched captions appear in the dedicated transcript textbox and are saved in
 the `transcript` column with `transcript_source = youtube`. Manually supplied
@@ -67,6 +75,11 @@ transcript; entries with a transcript display it in an expandable section.
 The app also saves the exact source text and input type used for the last
 analysis, separately from the current transcript, so edits do not overwrite the
 analysis record.
+
+Each saved journal displays its numeric database ID beside its title. To view a
+saved original transcript, enter that ID in **Retrieve a saved transcript** and
+click **Load transcript**. The transcript appears in a separate read-only
+textbox; the UI reports when the selected entry has no transcript saved.
 
 ## Configuration
 

@@ -80,6 +80,18 @@
       </section>
 
       <input id="search" placeholder="Search tags, e.g. sqlite">
+      <section class="panel" aria-labelledby="retrieve-transcript-heading">
+        <h2 id="retrieve-transcript-heading">Retrieve a saved transcript</h2>
+        <p class="muted">Enter the journal number shown beside an entry title to load its original saved transcript.</p>
+        <label for="transcript-entry-id">Journal number</label>
+        <div style="display: flex; gap: 8px;">
+          <input id="transcript-entry-id" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 33">
+          <button id="retrieve-transcript" type="button" class="secondary" style="white-space: nowrap;">Load transcript</button>
+        </div>
+        <p id="transcript-retrieval-status" role="status" aria-live="polite" class="muted"></p>
+        <label for="retrieved-transcript">Original saved transcript</label>
+        <textarea id="retrieved-transcript" rows="14" readonly placeholder="The transcript for the selected journal entry will appear here."></textarea>
+      </section>
       <section id="entries" aria-live="polite"></section>
     </main>
 
@@ -162,6 +174,39 @@
         transcriptSource = 'manual';
         transcriptUrl = '';
       });
+      byId('retrieve-transcript').addEventListener('click', async () => {
+        const rawId = byId('transcript-entry-id').value.trim();
+        const status = byId('transcript-retrieval-status');
+        const transcriptBox = byId('retrieved-transcript');
+        if (!/^[1-9]\d*$/.test(rawId)) {
+          transcriptBox.value = '';
+          status.textContent = 'Enter a valid positive journal number.';
+          status.className = 'muted error';
+          return;
+        }
+
+        const button = byId('retrieve-transcript');
+        button.disabled = true;
+        transcriptBox.value = '';
+        status.textContent = 'Loading saved journal transcript…';
+        status.className = 'muted';
+        try {
+          const entry = await request('/api/journals/' + encodeURIComponent(rawId));
+          if (!entry.transcript) {
+            status.textContent = `Journal #${entry.id} has no transcript saved.`;
+            status.className = 'muted error';
+            return;
+          }
+          transcriptBox.value = entry.transcript;
+          status.textContent = `Loaded ${entry.transcript.length.toLocaleString()} characters from “${entry.title}” (journal #${entry.id}; source: ${entry.transcript_source || 'unknown'}).`;
+          status.className = 'muted success';
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = 'muted error';
+        } finally {
+          button.disabled = false;
+        }
+      });
 
       // ==========================================
       // 🤖 AI Analyze 按钮逻辑
@@ -234,7 +279,7 @@
           byId('entries').replaceChildren();
           for (const entry of entries) {
             const article = document.createElement('article');
-            article.append(element('h2', entry.title), element('p', entry.source, 'muted'),
+            article.append(element('h2', `#${entry.id} — ${entry.title}`), element('p', entry.source, 'muted'),
               element('h3', 'AI Summary'), element('div', entry.ai_summary, 'entry-content'));
             if (entry.transcript) {
               const details = document.createElement('details');
